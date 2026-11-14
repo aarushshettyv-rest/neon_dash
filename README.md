@@ -19,6 +19,7 @@ Or simply open `index.html` directly in a browser.
 - **R** — retry
 - **M** — mute
 - **Esc** — back to menu
+- In the level editor: **Click** to place, **Right Click** to erase, **A/D** or the mouse wheel to pan, **Ctrl+Z** to undo, and **Enter** to test
 
 ## Features
 
@@ -27,6 +28,8 @@ Or simply open `index.html` directly in a browser.
 - Spike and block obstacles with forgiving hitboxes
 - Multiple speed zones (slow / normal / fast / very fast)
 - Practice mode with checkpoints
+- Level editor with save/load, undo, and play-testing; saved custom levels are available from **Play**
+- Player settings for username, icon shape, and preset or custom color
 - Attempt counter, death counter, and progress tracking
 - Particle effects, screen shake, and player trail
 

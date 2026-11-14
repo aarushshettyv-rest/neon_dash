@@ -47,9 +47,10 @@ function now() {
 
 // -------------------- State --------------------
 let gameState = "menu"; // menu | playing | paused | dead | complete | editor
-let menuScreen = "main"; // main | levels
+let menuScreen = "main"; // main | levels | settings
 let editorTesting = false;
 let menuSel = 0;
+let levelMenuScroll = 0;
 let practiceMode = false;
 let muted = false;
 
@@ -82,12 +83,74 @@ let trail = [];
 let bestProg = {};
 let totalAttempts = {};
 let coinsGot = {};
+const PLAYER_SKINS = [
+  { id: "cube", label: "Cube" },
+  { id: "diamond", label: "Diamond" },
+  { id: "circle", label: "Circle" },
+];
+const PLAYER_COLORS = [
+  { label: "Cyan", value: "#00E5FF" },
+  { label: "Pink", value: "#FF4FA3" },
+  { label: "Gold", value: "#FFD43B" },
+  { label: "Violet", value: "#A66BFF" },
+  { label: "Green", value: "#39E98A" },
+  { label: "Orange", value: "#FF813A" },
+];
+let playerName = "Player";
+let playerSkin = "cube";
+let playerColor = "#00E5FF";
+let settingsMessage = "";
+let settingsMessageT = 0;
 try {
   const s = JSON.parse(localStorage.getItem("gd_save2") || "{}");
   bestProg = s.bp || {};
   totalAttempts = s.ta || {};
   coinsGot = s.coins || {};
 } catch (e) {}
+try {
+  const profile = JSON.parse(localStorage.getItem("gd_profile") || "{}");
+  if (typeof profile.name === "string" && profile.name.trim()) {
+    playerName = profile.name.trim().slice(0, 18);
+  }
+  if (PLAYER_SKINS.some((skin) => skin.id === profile.skin)) playerSkin = profile.skin;
+  if (typeof profile.color === "string" && /^#[0-9a-f]{6}$/i.test(profile.color)) {
+    playerColor = profile.color.toUpperCase();
+  }
+} catch (e) {}
+
+function savePlayerProfile() {
+  try {
+    localStorage.setItem(
+      "gd_profile",
+      JSON.stringify({ name: playerName, skin: playerSkin, color: playerColor })
+    );
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function showSettingsMessage(message, saved) {
+  settingsMessage = saved ? message : "Changed, but couldn't save settings";
+  settingsMessageT = 90;
+}
+
+function changePlayerName() {
+  const name = window.prompt("Username (up to 18 characters):", playerName);
+  if (name === null) return;
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    showSettingsMessage("Username cannot be empty", true);
+    return;
+  }
+  playerName = trimmedName.slice(0, 18);
+  showSettingsMessage("Username updated", savePlayerProfile());
+}
+
+function changePlayerColor(value) {
+  playerColor = value;
+  showSettingsMessage("Color updated", savePlayerProfile());
+}
 function save() {
   try {
     localStorage.setItem(
@@ -206,6 +269,11 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (c === "Escape") {
+    if (gameState === "menu" && menuScreen !== "main") {
+      menuScreen = "main";
+      menuSel = 0;
+      return;
+    }
     if (editorTesting && (gameState === "playing" || gameState === "paused" || gameState === "dead" || gameState === "complete")) {
       returnToEditor();
       return;
@@ -215,6 +283,10 @@ window.addEventListener("keydown", (e) => {
       return;
     }
   }
+  if (c === "KeyR" && (gameState === "playing" || gameState === "dead")) {
+    restart();
+    return;
+  }
   if (c === "KeyP") {
     if (gameState === "playing") gameState = "paused";
     else if (gameState === "paused") gameState = "playing";
@@ -222,9 +294,16 @@ window.addEventListener("keydown", (e) => {
   if (c === "KeyM") muted = !muted;
 
   if (gameState === "menu") {
-    const max = menuScreen === "main" ? 3 : levels.length;
+    const max = menuScreen === "main"
+      ? 4
+      : menuScreen === "levels"
+        ? levels.length + editorLevels.length
+        : 9;
     if (c === "ArrowDown") menuSel = Math.min(menuSel + 1, max);
     if (c === "ArrowUp") menuSel = Math.max(menuSel - 1, 0);
+    if (menuScreen === "levels" && (c === "ArrowDown" || c === "ArrowUp")) {
+      ensureLevelMenuSelectionVisible();
+    }
     if (c === "Enter" || c === "Space") {
       e.preventDefault();
       menuAction();
@@ -310,6 +389,15 @@ canvas.addEventListener("mouseup", (e) => {
 });
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 canvas.addEventListener("wheel", (e) => {
+  if (gameState === "menu" && menuScreen === "levels") {
+    e.preventDefault();
+    const layout = levelMenuLayout();
+    levelMenuScroll = Math.max(
+      0,
+      Math.min(layout.maxScroll, levelMenuScroll + Math.sign(e.deltaY))
+    );
+    return;
+  }
   if (gameState !== "editor") return;
   e.preventDefault();
   cameraX = Math.max(0, cameraX + (e.deltaX || e.deltaY));
@@ -353,6 +441,8 @@ function goToMenu() {
   gameState = "menu";
   menuScreen = "main";
   menuSel = 0;
+  editorTesting = false;
+  edPainting = false;
   stopMusic();
   particles = [];
 }
@@ -1790,9 +1880,6 @@ function drawPlayer() {
   const cx = dx + PS / 2,
     cy = P.y + PS / 2;
 
-  const hue = levelData ? levelData.hue : 200;
-  const ph = hue + 120;
-
   if (practiceMode && checkpoints.length) {
     ctx.save();
     ctx.strokeStyle = "rgba(0, 255, 136, 0.75)";
@@ -1818,13 +1905,25 @@ function drawPlayer() {
       ctx.translate(tx, ty);
       ctx.rotate(t.rot || 0);
       ctx.globalAlpha = t.life * 0.32;
-      ctx.fillStyle = `hsl(${ph}, 85%, 58%)`;
+      ctx.fillStyle = playerColor;
       const sz = PS * (0.35 + t.life * 0.45);
       if (t.ship) {
         ctx.beginPath();
         ctx.moveTo(sz / 2, 0);
         ctx.lineTo(-sz / 2, -sz / 4);
         ctx.lineTo(-sz / 2, sz / 4);
+        ctx.closePath();
+        ctx.fill();
+      } else if (playerSkin === "circle") {
+        ctx.beginPath();
+        ctx.arc(0, 0, sz / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (playerSkin === "diamond") {
+        ctx.beginPath();
+        ctx.moveTo(0, -sz / 2);
+        ctx.lineTo(sz / 2, 0);
+        ctx.lineTo(0, sz / 2);
+        ctx.lineTo(-sz / 2, 0);
         ctx.closePath();
         ctx.fill();
       } else {
@@ -1840,13 +1939,12 @@ function drawPlayer() {
   ctx.rotate(P.rot);
 
   if (P.isShip) {
-    // Ship mode — improved with gradient
     ctx.save();
-    ctx.shadowColor = "#00ffcc";
+    ctx.shadowColor = playerColor;
     ctx.shadowBlur = 18;
     const sg = ctx.createLinearGradient(-PS / 2, 0, PS / 2, 0);
-    sg.addColorStop(0, "#009988");
-    sg.addColorStop(1, "#00ffcc");
+    sg.addColorStop(0, colorAlpha(playerColor, 0.68));
+    sg.addColorStop(1, playerColor);
     ctx.fillStyle = sg;
     ctx.beginPath();
     ctx.moveTo(PS / 2, 0);
@@ -1855,40 +1953,65 @@ function drawPlayer() {
     ctx.lineTo(-PS / 2, PS / 3);
     ctx.closePath();
     ctx.fill();
-    // Engine glow
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
     ctx.globalAlpha = 0.3 + Math.sin(now() * 0.015) * 0.1;
-    ctx.fillStyle = "#00ffcc";
+    ctx.fillStyle = playerColor;
     ctx.fillRect(-PS * 0.8, -4, PS * 0.35, 8);
     ctx.globalAlpha = 1;
     ctx.restore();
   } else {
-    // Cube mode — improved with gradient, icon, and glow
     ctx.save();
-    ctx.shadowColor = `hsl(${ph}, 100%, 60%)`;
+    ctx.shadowColor = playerColor;
     ctx.shadowBlur = 16;
-    // Gradient fill
-    const cg = ctx.createLinearGradient(-PS / 2, -PS / 2, PS / 2, PS / 2);
-    cg.addColorStop(0, `hsl(${ph}, 80%, 55%)`);
-    cg.addColorStop(1, `hsl(${ph}, 70%, 40%)`);
-    ctx.fillStyle = cg;
-    ctx.fillRect(-PS / 2, -PS / 2, PS, PS);
-    // Border
-    ctx.strokeStyle = `hsl(${ph}, 100%, 72%)`;
+    ctx.fillStyle = playerColor;
+    ctx.strokeStyle = "#fff";
     ctx.lineWidth = 2.5;
-    ctx.strokeRect(-PS / 2, -PS / 2, PS, PS);
+    if (playerSkin === "circle") {
+      ctx.beginPath();
+      ctx.arc(0, 0, PS / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (playerSkin === "diamond") {
+      ctx.beginPath();
+      ctx.moveTo(0, -PS / 2);
+      ctx.lineTo(PS / 2, 0);
+      ctx.lineTo(0, PS / 2);
+      ctx.lineTo(-PS / 2, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(-PS / 2, -PS / 2, PS, PS);
+      ctx.strokeRect(-PS / 2, -PS / 2, PS, PS);
+    }
     ctx.fillStyle = "#fff";
-    ctx.fillRect(-11, -8, 8, 8);
-    ctx.fillRect(3, -8, 8, 8);
+    ctx.beginPath();
+    ctx.arc(-7, -5, 3.5, 0, Math.PI * 2);
+    ctx.arc(7, -5, 3.5, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "#14141c";
-    ctx.fillRect(-8, -6, 4, 4);
-    ctx.fillRect(6, -6, 4, 4);
+    ctx.beginPath();
+    ctx.arc(-7, -5, 1.7, 0, Math.PI * 2);
+    ctx.arc(7, -5, 1.7, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
   ctx.restore();
 
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  ctx.font = '12px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = "center";
+  ctx.shadowColor = "#000";
+  ctx.shadowBlur = 4;
+  ctx.fillText(playerName, cx, P.y - 8, 150);
+  ctx.restore();
+
   // Trail sparkle particles
   if (gameState === "playing" && !P.dead && Math.random() < 0.3) {
-    emitP(P.x, P.y + PS, `hsl(${ph}, 80%, 55%)`, 1, 3);
+    emitP(P.x, P.y + PS, playerColor, 1, 3);
   }
 }
 
@@ -2159,6 +2282,31 @@ function colorAlpha(c, a) {
   return c;
 }
 
+function levelMenuLayout() {
+  const top = H * 0.18;
+  const step = 74;
+  const backY = H - 52;
+  const visibleCount = Math.max(1, Math.floor((backY - 14 - top) / step));
+  const totalCount = levels.length + editorLevels.length;
+  const maxScroll = Math.max(0, totalCount - visibleCount);
+  levelMenuScroll = Math.max(0, Math.min(maxScroll, levelMenuScroll));
+  return { top, step, rowHeight: step - 8, visibleCount, totalCount, maxScroll, backY };
+}
+
+function ensureLevelMenuSelectionVisible() {
+  const layout = levelMenuLayout();
+  if (menuSel < levelMenuScroll) levelMenuScroll = menuSel;
+  else if (menuSel < layout.totalCount && menuSel >= levelMenuScroll + layout.visibleCount) {
+    levelMenuScroll = menuSel - layout.visibleCount + 1;
+  }
+  levelMenuScroll = Math.max(0, Math.min(layout.maxScroll, levelMenuScroll));
+}
+
+function selectMenuLevel(idx) {
+  if (idx < levels.length) startLevel(idx);
+  else startSavedLevel(idx - levels.length);
+}
+
 function drawMenu() {
   // Clean dark background
   ctx.fillStyle = "#0b0b14";
@@ -2215,7 +2363,7 @@ function drawMenu() {
     ctx.fillStyle = "rgba(255,255,255,0.3)";
     ctx.font = `${Math.min(16, W * 0.02)}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText("A browser-based tribute", W / 2, H * 0.2 + 36);
+    ctx.fillText("A browser-based tribute  \u00B7  " + playerName, W / 2, H * 0.2 + 36, W * 0.8);
 
     // Decorative line
     const lineW = Math.min(240, W * 0.3);
@@ -2241,6 +2389,7 @@ function drawMenu() {
         label: "Sound: " + (muted ? "OFF" : "ON"),
         col: muted ? "#ff4444" : "#555",
       },
+      { label: "\u2699  Settings", col: "#aa88ff" },
     ];
     const bh = Math.min(54, Math.max(40, (H * 0.46) / items.length));
     const gap = bh + 8;
@@ -2284,7 +2433,7 @@ function drawMenu() {
       W / 2,
       H - 22
     );
-  } else {
+  } else if (menuScreen === "levels") {
     // Level select — title
     ctx.save();
     ctx.shadowColor = "#fff";
@@ -2295,14 +2444,21 @@ function drawMenu() {
     ctx.fillText("Select Level", W / 2, H * 0.11);
     ctx.restore();
 
-    const bw = Math.min(360, W * 0.5),
-      bh = 78,
-      bx = W / 2 - bw / 2;
-    levels.forEach((lv, i) => {
-      const by = H * 0.18 + i * 100;
+    const layout = levelMenuLayout();
+    const bw = Math.min(360, W * 0.5);
+    const bx = W / 2 - bw / 2;
+    const end = Math.min(layout.totalCount, levelMenuScroll + layout.visibleCount);
+    for (let i = levelMenuScroll; i < end; i++) {
+      const isCustom = i >= levels.length;
+      const customIndex = i - levels.length;
+      const lv = isCustom ? editorLevels[customIndex] : levels[i];
+      if (!lv) continue;
+      const progressKey = isCustom ? "c" + customIndex : i;
+      const by = layout.top + (i - levelMenuScroll) * layout.step;
+      const bh = layout.rowHeight;
       const hov = menuSel === i;
-      const best = bestProg[i] || 0;
-      const col = best >= 100 ? "#00ff88" : `hsl(${lv.hue}, 70%, 50%)`;
+      const best = bestProg[progressKey] || 0;
+      const col = best >= 100 ? "#00ff88" : isCustom ? "#44ddff" : `hsl(${lv.hue}, 70%, 50%)`;
       ctx.save();
       if (hov) {
         ctx.shadowColor = col;
@@ -2327,20 +2483,18 @@ function drawMenu() {
       ctx.fillStyle = hov ? "#000" : "#fff";
       ctx.font = `bold ${Math.min(22, W * 0.03)}px "Segoe UI", system-ui, sans-serif`;
       ctx.textAlign = "center";
-      ctx.fillText(lv.name, W / 2, by + 32);
+      ctx.fillText(lv.name, W / 2, by + 25, bw - 28);
 
-      // Difficulty + best progress
-      const diff = ["Easy", "Medium", "Hard"][i];
+      const detail = isCustom ? "Custom" : ["Easy", "Medium", "Hard"][i];
       ctx.font = `${Math.min(14, W * 0.018)}px "Segoe UI", system-ui, sans-serif`;
       ctx.fillStyle = hov ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.45)";
       ctx.fillText(
-        `${diff}  \u00B7  Best ${best}%${best >= 100 ? " \u2605" : ""}  \u00B7  ${totalCoins(i)}/3 \u25C6`,
+        `${detail}  \u00B7  Best ${best}%${best >= 100 ? " \u2605" : ""}  \u00B7  ${totalCoins(progressKey)}/3 \u25C6`,
         W / 2,
-        by + 56
+        by + 46
       );
 
-      // Mini progress bar inside level button
-      const pbW = bw * 0.6, pbH = 4, pbX = W / 2 - pbW / 2, pbY = by + 64;
+      const pbW = bw * 0.6, pbH = 3, pbX = W / 2 - pbW / 2, pbY = by + 55;
       ctx.fillStyle = hov ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.06)";
       ctx.fillRect(pbX, pbY, pbW, pbH);
       if (best > 0) {
@@ -2349,14 +2503,21 @@ function drawMenu() {
       }
 
       menuBtns.push({ x: bx, y: by, w: bw, h: bh, act: 10 + i });
-    });
+    }
+
+    if (layout.totalCount > layout.visibleCount) {
+      ctx.fillStyle = "rgba(255,255,255,0.35)";
+      ctx.font = '12px "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText("Scroll to see more levels", W / 2, H * 0.11 + 25);
+    }
 
     // Back button
     const backBw = Math.min(200, W * 0.28);
     const backBx = W / 2 - backBw / 2;
-    const backY = H * 0.18 + levels.length * 100 + 16;
-    const bhBack = 52;
-    const hov = menuSel === levels.length;
+    const backY = layout.backY;
+    const bhBack = 42;
+    const hov = menuSel === layout.totalCount;
     ctx.save();
     if (hov) {
       ctx.shadowColor = "#ff4444";
@@ -2372,9 +2533,132 @@ function drawMenu() {
     ctx.fillStyle = hov ? "#000" : "#fff";
     ctx.font = `bold ${Math.min(18, W * 0.024)}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText("\u2190  Back", W / 2, backY + 34);
+    ctx.fillText("\u2190  Back", W / 2, backY + 28);
     menuBtns.push({ x: backBx, y: backY, w: backBw, h: bhBack, act: 99 });
+  } else {
+    drawSettingsMenu();
   }
+}
+
+function drawSettingsMenu() {
+  ctx.save();
+  ctx.shadowColor = "#aa88ff";
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = "#fff";
+  ctx.font = `bold ${Math.min(42, W * 0.055)}px "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText("Player Settings", W / 2, H * 0.11);
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(W / 2, H * 0.17);
+  ctx.fillStyle = playerColor;
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2;
+  ctx.shadowColor = playerColor;
+  ctx.shadowBlur = 14;
+  if (playerSkin === "circle") {
+    ctx.beginPath();
+    ctx.arc(0, 0, 17, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else if (playerSkin === "diamond") {
+    ctx.beginPath();
+    ctx.moveTo(0, -20);
+    ctx.lineTo(20, 0);
+    ctx.lineTo(0, 20);
+    ctx.lineTo(-20, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(-17, -17, 34, 34);
+    ctx.strokeRect(-17, -17, 34, 34);
+  }
+  ctx.restore();
+
+  const bw = Math.min(420, W * 0.78);
+  const bx = W / 2 - bw / 2;
+  const buttons = [
+    { id: 0, label: "Username: " + playerName, y: H * 0.24 },
+    {
+      id: 1,
+      label: "Appearance: " + PLAYER_SKINS.find((skin) => skin.id === playerSkin).label,
+      y: H * 0.36,
+    },
+  ];
+  buttons.forEach((button) => {
+    const hov = menuSel === button.id;
+    ctx.fillStyle = hov ? "rgba(170,136,255,0.22)" : "rgba(255,255,255,0.04)";
+    ctx.strokeStyle = hov ? "#aa88ff" : "rgba(255,255,255,0.22)";
+    ctx.lineWidth = hov ? 2 : 1;
+    rRect(bx, button.y, bw, 48, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText(button.label, W / 2, button.y + 30, bw - 24);
+    menuBtns.push({ x: bx, y: button.y, w: bw, h: 48, act: button.id });
+  });
+
+  ctx.fillStyle = "rgba(255,255,255,0.65)";
+  ctx.font = '14px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = "center";
+  ctx.fillText("Choose a color  \u00B7  " + playerColor, W / 2, H * 0.50);
+
+  const gap = 9;
+  const swatchSize = Math.min(48, (W - 40 - gap * (PLAYER_COLORS.length - 1)) / PLAYER_COLORS.length);
+  const rowWidth = PLAYER_COLORS.length * swatchSize + (PLAYER_COLORS.length - 1) * gap;
+  const startX = (W - rowWidth) / 2;
+  const swatchY = H * 0.53;
+  PLAYER_COLORS.forEach((color, i) => {
+    const x = startX + i * (swatchSize + gap);
+    const selected = playerColor === color.value;
+    const hov = menuSel === i + 2;
+    ctx.fillStyle = color.value;
+    ctx.strokeStyle = selected || hov ? "#fff" : "rgba(255,255,255,0.35)";
+    ctx.lineWidth = selected || hov ? 3 : 1;
+    rRect(x, swatchY, swatchSize, swatchSize, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.font = '10px "Segoe UI", system-ui, sans-serif';
+    ctx.fillText(color.label, x + swatchSize / 2, swatchY + swatchSize + 16);
+    menuBtns.push({ x, y: swatchY, w: swatchSize, h: swatchSize, act: i + 2 });
+  });
+
+  const custom = { x: W / 2 - 100, y: H * 0.66, w: 200, h: 42, act: 8 };
+  ctx.fillStyle = menuSel === custom.act ? "rgba(170,136,255,0.22)" : "rgba(255,255,255,0.04)";
+  ctx.strokeStyle = "#aa88ff";
+  ctx.lineWidth = menuSel === custom.act ? 2 : 1;
+  rRect(custom.x, custom.y, custom.w, custom.h, 9);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+  ctx.fillText("Custom color", W / 2, custom.y + 27);
+  menuBtns.push(custom);
+
+  const back = { x: W / 2 - 100, y: H * 0.79, w: 200, h: 42, act: 9 };
+  ctx.fillStyle = menuSel === back.act ? "#aa88ff" : "rgba(255,255,255,0.04)";
+  ctx.strokeStyle = "#aa88ff";
+  ctx.lineWidth = menuSel === back.act ? 2 : 1;
+  rRect(back.x, back.y, back.w, back.h, 9);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = menuSel === back.act ? "#101018" : "#fff";
+  ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+  ctx.fillText("\u2190  Back", W / 2, back.y + 27);
+  menuBtns.push(back);
+
+  if (settingsMessageT > 0) {
+    settingsMessageT--;
+    ctx.fillStyle = settingsMessage.includes("couldn't") ? "#ff8c8c" : "#78ffb4";
+    ctx.font = '13px "Segoe UI", system-ui, sans-serif';
+    ctx.fillText(settingsMessage, W / 2, H * 0.75);
+  }
+  ctx.restore();
 }
 
 function menuAction() {
@@ -2382,14 +2666,44 @@ function menuAction() {
     if (menuSel === 0) {
       menuScreen = "levels";
       menuSel = 0;
+      levelMenuScroll = 0;
     } else if (menuSel === 1) openEditor();
     else if (menuSel === 2) practiceMode = !practiceMode;
     else if (menuSel === 3) muted = !muted;
+    else if (menuSel === 4) {
+      menuScreen = "settings";
+      menuSel = 0;
+      settingsMessage = "";
+    }
+  } else if (menuScreen === "settings") {
+    if (menuSel === 0) changePlayerName();
+    else if (menuSel === 1) {
+      const current = PLAYER_SKINS.findIndex((skin) => skin.id === playerSkin);
+      playerSkin = PLAYER_SKINS[(current + 1) % PLAYER_SKINS.length].id;
+      showSettingsMessage("Appearance updated", savePlayerProfile());
+    } else if (menuSel >= 2 && menuSel < 2 + PLAYER_COLORS.length) {
+      changePlayerColor(PLAYER_COLORS[menuSel - 2].value);
+    } else if (menuSel === 8) {
+      const color = window.prompt("Enter a hex color (#RRGGBB):", playerColor);
+      if (color !== null) {
+        const trimmedColor = color.trim();
+        if (/^#[0-9a-f]{6}$/i.test(trimmedColor)) {
+          changePlayerColor(trimmedColor.toUpperCase());
+        } else {
+          showSettingsMessage("Use a hex color like #12ABEF", true);
+        }
+      }
+    } else if (menuSel === 9) {
+      menuScreen = "main";
+      menuSel = 0;
+    }
   } else {
-    if (menuSel < levels.length) startLevel(menuSel);
+    const count = levels.length + editorLevels.length;
+    if (menuSel < count) selectMenuLevel(menuSel);
     else {
       menuScreen = "main";
       menuSel = 0;
+      levelMenuScroll = 0;
     }
   }
 }
@@ -2397,14 +2711,18 @@ function menuAction() {
 function menuClickAt(mx, my) {
   for (const b of menuBtns) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      if (b.act < 4) {
+      if (menuScreen === "main" && b.act < 5) {
         menuSel = b.act;
         menuAction();
-      } else if (b.act >= 10 && b.act < 10 + levels.length)
-        startLevel(b.act - 10);
+      } else if (menuScreen === "settings") {
+        menuSel = b.act;
+        menuAction();
+      } else if (b.act >= 10 && b.act < 10 + levels.length + editorLevels.length)
+        selectMenuLevel(b.act - 10);
       else if (b.act === 99) {
         menuScreen = "main";
         menuSel = 0;
+        levelMenuScroll = 0;
       }
       return;
     }
@@ -2531,7 +2849,9 @@ function persistEditorStore() {
       "gd_editor_draft",
       JSON.stringify({ name: edName, objs: edObjs, slot: edSlot })
     );
+    return true;
   } catch (e) {}
+  return false;
 }
 
 function edGroundTool(id) {
@@ -2665,6 +2985,7 @@ function editorDown(e) {
 
 function openEditor() {
   editorTesting = false;
+  edPainting = false;
   gameState = "editor";
   stopMusic();
   cameraX = Math.max(0, cameraX);
@@ -2673,6 +2994,7 @@ function openEditor() {
 
 function returnToEditor() {
   editorTesting = false;
+  edPainting = false;
   gameState = "editor";
   stopMusic();
   particles = [];
@@ -2698,10 +3020,28 @@ function playEditor() {
   showAttemptFlash();
 }
 
+function startSavedLevel(idx) {
+  const saved = editorLevels[idx];
+  if (!saved) return;
+  initAudio();
+  editorTesting = false;
+  currentLevelIdx = "c" + idx;
+  levelData = compileEditor(saved.objs, saved.name);
+  deathNum = 0;
+  attemptNum = (totalAttempts[currentLevelIdx] || 0) + 1;
+  totalAttempts[currentLevelIdx] = attemptNum;
+  levelTimer = now();
+  levelFinishTime = 0;
+  resetPlayer(false);
+  gameState = "playing";
+  startMusic();
+  showAttemptFlash();
+}
+
 function saveEditor() {
   const data = { name: edName, objs: edObjs };
   if (edSlot == null || !editorLevels[edSlot]) {
-    edName = "My Level " + (editorLevels.length + 1);
+    if (edName === "Untitled") edName = "My Level " + (editorLevels.length + 1);
     data.name = edName;
     editorLevels.push(data);
     edSlot = editorLevels.length - 1;
@@ -2709,8 +3049,26 @@ function saveEditor() {
     data.name = edName;
     editorLevels[edSlot] = data;
   }
-  persistEditorStore();
-  edMsg = "Saved";
+  edMsg = persistEditorStore() ? "Saved" : "Save failed - storage unavailable";
+  edMsgT = 70;
+}
+
+function renameEditorLevel() {
+  const name = window.prompt("Level name:", edName);
+  if (name === null) return;
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    edMsg = "Name cannot be empty";
+    edMsgT = 70;
+    return;
+  }
+  edName = trimmedName.slice(0, 40);
+  if (edSlot != null && editorLevels[edSlot]) {
+    editorLevels[edSlot].name = edName;
+  }
+  edMsg = persistEditorStore()
+    ? "Name updated"
+    : "Name changed, but storage is unavailable";
   edMsgT = 70;
 }
 
@@ -2784,6 +3142,10 @@ function editorTopClick(mx, my) {
       else if (b.id === "exit") goToMenu();
       return;
     }
+  }
+  if (my < 40 && mx < W - (4 * (64 + 6) + 12)) {
+    renameEditorLevel();
+    return;
   }
   if (my > 40 && my < editorTopH()) {
     let x = 12;
@@ -2863,7 +3225,7 @@ function drawEditorUI() {
   ctx.fillStyle = "#fff";
   ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
   ctx.textAlign = "left";
-  ctx.fillText(edName + "   \u00B7   " + edObjs.length, 14, 26);
+  ctx.fillText(edName + "   \u270E   \u00B7   " + edObjs.length, 14, 26);
 
   for (const b of editorHeaderButtons()) {
     ctx.fillStyle = "rgba(255,255,255,0.05)";
