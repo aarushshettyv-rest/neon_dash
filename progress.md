@@ -1,9 +1,9 @@
-Original prompt: Build a complete Geometry Dash-style 2D platformer with a menu, three levels, ship mode, pads/orbs/portals, neon visuals, audio, practice mode, pause, and stats. Make it playable, improve level balance and background animation, and split the game into `index.html`, `styles.css`, and `game.js`.
+Project goal: Build an original neon rhythm platformer with a menu, three levels, flight mode, pads/orbs/portals, visuals, synthesized audio, practice mode, pause, and stats. Make it playable, improve level balance and background animation, and split the game into `index.html`, `styles.css`, and `game.js`.
 
 ## Completed
 
 - Built the canvas game with three hand-authored levels, gameplay controls, audio, stats, practice checkpoints, pause/menu navigation, and fullscreen support.
-- Tuned obstacle spacing and platform placement; added ceiling spikes and redesigned the Back on Track ship section.
+- Tuned obstacle spacing and platform placement; added ceiling spikes and redesigned a flight section.
 - Added an editor with placement tools, erase, pan, undo, save/load, naming, and play-testing.
 - Added saved custom levels to the Play menu, including scrolling selection and custom-level progress tracking.
 - Added player settings for username, cube/diamond/circle appearance, and preset or custom color; profile choices persist locally.

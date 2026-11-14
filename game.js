@@ -1875,7 +1875,7 @@ function drawGroundAndCeil() {
   }
   ctx.restore();
 
-  // Ground cubes, Geometry Dash style, brighten on the beat
+  // Ground tiles brighten on the beat
   const energy = beatEnergy();
   const tile = 34;
   const tox = -(((cameraX % tile) + tile) % tile);
@@ -2708,7 +2708,7 @@ function drawMenu() {
     const titleSize = Math.min(68, W * 0.085, compact ? H * 0.08 : 68);
     ctx.font = `bold ${titleSize}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText("GEOMETRY DASH", W / 2, compact ? H * 0.1 : H * 0.2, W * 0.94);
+    ctx.fillText("NEON DASH", W / 2, compact ? H * 0.1 : H * 0.2, W * 0.94);
     ctx.restore();
 
     // Subtitle with accent
@@ -2716,7 +2716,7 @@ function drawMenu() {
     ctx.font = `${Math.min(16, W * 0.02)}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.fillText(
-      "A browser-based tribute  \u00B7  " + playerName,
+      "An original neon rhythm game  \u00B7  " + playerName,
       W / 2,
       compact ? H * 0.2 : H * 0.2 + 36,
       W * 0.8
