@@ -8,6 +8,22 @@
 </head>
 <body>
   <canvas id="c"></canvas>
+  <div id="auth-modal" class="auth-modal" hidden>
+    <form id="auth-form" class="auth-card">
+      <h2 id="auth-title">Sign in</h2>
+      <label for="auth-email">Email</label>
+      <input id="auth-email" name="email" type="email" autocomplete="email" required>
+      <label for="auth-password">Password</label>
+      <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="6" required>
+      <p id="auth-error" role="status" aria-live="polite"></p>
+      <div class="auth-actions">
+        <button id="auth-cancel" type="button">Cancel</button>
+        <button id="auth-submit" type="submit">Sign in</button>
+      </div>
+    </form>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

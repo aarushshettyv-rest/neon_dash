@@ -14,12 +14,13 @@ Or simply open `index.html` directly in a browser.
 
 ## Controls
 
-- **Space / Left Click / Up Arrow** — jump / fly
-- **P** — pause
+- **Space / Up Arrow / Click or Tap** — jump / fly
+- **P / On-screen pause button** — pause
 - **R** — retry
 - **M** — mute
 - **Esc** — back to menu
-- In the level editor: **Click** to place, **Right Click** to erase, **A/D** or the mouse wheel to pan, **Ctrl+Z** to undo, and **Enter** to test
+- In the level editor: **Click or Tap** to place, use the **Erase** tool (or right-click) to erase, **A/D** or the mouse wheel to pan, and **two-finger drag** to pan on touch screens. Use **Ctrl+Z** to undo and **Enter** to test.
+- On touch screens, swipe the level list to browse saved custom levels.
 
 ## Features
 
@@ -30,14 +31,27 @@ Or simply open `index.html` directly in a browser.
 - Practice mode with checkpoints
 - Level editor with save/load, undo, and play-testing; saved custom levels are available from **Play**
 - Player settings for username, icon shape, and preset or custom color
+- Supabase account scaffold with email/password, Google, and Apple sign-in; cloud saves for progress, profile, and saved custom levels
 - Attempt counter, death counter, and progress tracking
 - Particle effects, screen shake, and player trail
+
+## Supabase setup
+
+1. Create a Supabase project and run `supabase/schema.sql` in its SQL Editor. The table uses row-level security so each account can access only its own save.
+2. In `supabase-config.js`, set `url` to the project URL and `anonKey` to the project's publishable key (or legacy anon key). These browser values are public; **never use a `service_role` key**.
+3. In Supabase Authentication settings, enable Email, then add your local and deployed site URLs to the allowed redirect URLs (for example `http://localhost:8000/**` and your Vercel site URL).
+4. Configure Google and/or Apple credentials in the corresponding Supabase Auth provider settings to enable those buttons. OAuth sign-in will not work until the provider and its redirect URLs are configured.
+5. Serve the folder over HTTP (for example, `python -m http.server 8000`) and reload the game. Use **Account** on the main menu to sign up or sign in.
+
+The game continues to use local storage while signed out. After sign-in, it merges progress and coin records, combines saved custom levels while retaining different same-name versions, and syncs the player profile. Email confirmation may be required based on the project's Auth settings. The Supabase JavaScript client is loaded from jsDelivr, so the page needs an internet connection for account features.
 
 ## Files
 
 - `index.html` — entry point
 - `game.js` — all game logic
 - `styles.css` — canvas styling
+- `supabase-config.js` — public Supabase project URL and key placeholders
+- `supabase/schema.sql` — per-user cloud-save table and row-level security
 - `actions.json` — scripted input sequence (for automated testing/playback)
 
 ## License

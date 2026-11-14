@@ -1,16 +1,39 @@
-Original prompt: Build a complete Geometry Dash-style 2D platformer with menu, 3 levels, ship mode, pads/orbs/portals, neon visuals, audio, practice mode, pause, stats, and make it fully playable. Fix issues: add menu access during gameplay, show attempt tracker, ensure levels are beatable (esp. triple spikes and platform spikes), make background animations less weird, and split into index.html, styles.css, game.js.
+Original prompt: Build a complete Geometry Dash-style 2D platformer with a menu, three levels, ship mode, pads/orbs/portals, neon visuals, audio, practice mode, pause, and stats. Make it playable, improve level balance and background animation, and split the game into `index.html`, `styles.css`, and `game.js`.
 
-Work log:
-- Split into 3 files: `index.html`, `styles.css`, `game.js`.
-- Implemented polished canvas game with 3 hand-authored levels, menu access (Esc/back button), attempt flash, practice mode checkpoints, stats, audio, and cleaner background.
-- Adjusted spike size/spacing and platform spike placement to make early sections passable at normal speed.
-- Added fullscreen toggle (`F`) and hooks for `render_game_to_text` and `advanceTime`.
+## Completed
 
-TODOs / next steps:
-- Run Playwright test client with action bursts and inspect screenshots + render_game_to_text output.
-- Verify level difficulty with manual play (especially Level 1 early spikes and Level 2 ship section) and adjust if needed.
-- Ensure no console errors in Playwright run.
-- Shortened double-spike spacing from 90px to 70px in all levels; updated physics note accordingly.
-- Fixed `now()` helper recursion to avoid stack overflow during Playwright runs.
-- Redesigned Back on Track ship section with ground/ceiling spikes, irregular mid obstacles, and a narrowing funnel + final wall opening.
-- Added ceiling spike type (spikeD) with collision + rendering + text state support.
+- Built the canvas game with three hand-authored levels, gameplay controls, audio, stats, practice checkpoints, pause/menu navigation, and fullscreen support.
+- Tuned obstacle spacing and platform placement; added ceiling spikes and redesigned the Back on Track ship section.
+- Added an editor with placement tools, erase, pan, undo, save/load, naming, and play-testing.
+- Added saved custom levels to the Play menu, including scrolling selection and custom-level progress tracking.
+- Added player settings for username, cube/diamond/circle appearance, and preset or custom color; profile choices persist locally.
+- Improved phone/tablet usability with responsive editor toolbars, touch scrolling for saved levels, two-finger editor panning, and an on-screen pause control.
+- Fixed editor/test state cleanup and retry handling; added the documented `R` retry shortcut.
+- Updated `README.md` with editor, custom-level, player settings, and touch-control instructions.
+- Checked the deployed site at commit `510315f`; its assets returned HTTP 200 and its script matched that committed source.
+
+## Verification
+
+- `node --check game.js` passes.
+- Smoke checks covered saving and launching a custom level, retrying, changing player settings, and profile persistence.
+- Responsive smoke checks covered nine phone/tablet viewport sizes, editor tool selection and touch panning, custom-level touch selection, and touch pause.
+- The deployed `game.js` parses successfully.
+
+## Remaining manual QA
+
+- Test gameplay and editor workflows on physical iOS and Android devices in portrait and landscape.
+- Verify practice checkpoints, level difficulty, and browser console output in real browsers.
+
+## Supabase scaffold
+
+- Added an Account menu with email/password sign-up and sign-in, Google and Apple OAuth buttons, plus sign-out.
+- Added per-user cloud saves for progress, coins, player profile, and saved custom levels; local saves remain available while signed out.
+- Added `supabase/schema.sql` with row-level security and a public-key-only config placeholder in `supabase-config.js`.
+- Documented project setup, auth providers, redirect URLs, and safe key handling in `README.md`.
+
+## Supabase verification and setup still needed
+
+- `node --check game.js` and `git diff --check` (with Windows CRLF handling) pass.
+- Mocked Supabase smoke tests passed for account navigation, email sign-up, cloud merge/upload, Google OAuth invocation, and sign-out.
+- Account menu layout passed mocked checks at nine phone/tablet viewport sizes.
+- Create/configure the Supabase project, run the SQL schema, add provider credentials and redirect URLs, then verify email and OAuth flows against that project.

@@ -47,7 +47,7 @@ function now() {
 
 // -------------------- State --------------------
 let gameState = "menu"; // menu | playing | paused | dead | complete | editor
-let menuScreen = "main"; // main | levels | settings
+let menuScreen = "main"; // main | levels | settings | account
 let editorTesting = false;
 let menuSel = 0;
 let levelMenuScroll = 0;
@@ -83,6 +83,11 @@ let trail = [];
 let bestProg = {};
 let totalAttempts = {};
 let coinsGot = {};
+let supabaseClient = null;
+let authUser = null;
+let cloudSaveTimer = null;
+let accountMessage = "Supabase is not configured";
+let authFormMode = "signin";
 const PLAYER_SKINS = [
   { id: "cube", label: "Cube" },
   { id: "diamond", label: "Diamond" },
@@ -124,6 +129,7 @@ function savePlayerProfile() {
       "gd_profile",
       JSON.stringify({ name: playerName, skin: playerSkin, color: playerColor })
     );
+    queueCloudSave();
     return true;
   } catch (e) {
     return false;
@@ -157,8 +163,279 @@ function save() {
       "gd_save2",
       JSON.stringify({ bp: bestProg, ta: totalAttempts, coins: coinsGot })
     );
+    queueCloudSave();
   } catch (e) {}
 }
+
+function showAccountMessage(message) {
+  accountMessage = message;
+}
+
+function makeCloudSnapshot() {
+  return {
+    version: 1,
+    game: { bestProgress: bestProg, totalAttempts, coins: coinsGot },
+    profile: { name: playerName, skin: playerSkin, color: playerColor },
+    editor: { levels: editorLevels },
+  };
+}
+
+function mergeCloudSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return;
+  const game = snapshot.game && typeof snapshot.game === "object" ? snapshot.game : {};
+  const mergeMaxValues = (localValues, cloudValues) => {
+    const merged = {};
+    if (cloudValues && typeof cloudValues === "object") Object.assign(merged, cloudValues);
+    if (localValues && typeof localValues === "object") {
+      for (const [key, value] of Object.entries(localValues)) {
+        const cloudValue = Number(merged[key]);
+        const localValue = Number(value);
+        if (Number.isFinite(localValue)) {
+          merged[key] = Number.isFinite(cloudValue) ? Math.max(cloudValue, localValue) : localValue;
+        }
+      }
+    }
+    return merged;
+  };
+  bestProg = mergeMaxValues(bestProg, game.bestProgress);
+  totalAttempts = mergeMaxValues(totalAttempts, game.totalAttempts);
+
+  const cloudCoins = game.coins && typeof game.coins === "object" ? game.coins : {};
+  const mergedCoins = { ...cloudCoins };
+  for (const [levelId, coins] of Object.entries(coinsGot)) {
+    mergedCoins[levelId] = { ...(cloudCoins[levelId] || {}), ...(coins || {}) };
+  }
+  coinsGot = mergedCoins;
+
+  const profile = snapshot.profile && typeof snapshot.profile === "object" ? snapshot.profile : {};
+  if (typeof profile.name === "string" && profile.name.trim()) {
+    playerName = profile.name.trim().slice(0, 18);
+  }
+  if (PLAYER_SKINS.some((skin) => skin.id === profile.skin)) playerSkin = profile.skin;
+  if (typeof profile.color === "string" && /^#[0-9a-f]{6}$/i.test(profile.color)) {
+    playerColor = profile.color.toUpperCase();
+  }
+
+  const cloudLevels = Array.isArray(snapshot.editor && snapshot.editor.levels)
+    ? snapshot.editor.levels
+    : [];
+  const mergedLevels = [];
+  const addLevelIfMissing = (level) => {
+    if (!level || typeof level.name !== "string" || !Array.isArray(level.objs)) return;
+    const alreadyPresent = mergedLevels.some(
+      (saved) =>
+        saved.name === level.name && JSON.stringify(saved.objs) === JSON.stringify(level.objs)
+    );
+    if (!alreadyPresent) mergedLevels.push(level);
+  };
+  for (const level of cloudLevels) {
+    addLevelIfMissing(level);
+  }
+  for (const level of editorLevels) addLevelIfMissing(level);
+  editorLevels = mergedLevels;
+
+  save();
+  savePlayerProfile();
+  persistEditorStore();
+}
+
+async function uploadCloudSave() {
+  if (!supabaseClient || !authUser) return;
+  const userId = authUser.id;
+  try {
+    const { error } = await supabaseClient
+      .from("player_saves")
+      .upsert(
+        { user_id: userId, save_data: makeCloudSnapshot(), updated_at: new Date().toISOString() },
+        { onConflict: "user_id" }
+      );
+    if (authUser && authUser.id === userId) {
+      showAccountMessage(error ? `Cloud save failed: ${error.message}` : "Cloud save synced");
+    }
+  } catch (error) {
+    if (authUser && authUser.id === userId) {
+      showAccountMessage(`Cloud save failed: ${error.message}`);
+    }
+  }
+}
+
+function queueCloudSave() {
+  if (!supabaseClient || !authUser) return;
+  if (cloudSaveTimer !== null) clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(() => {
+    cloudSaveTimer = null;
+    uploadCloudSave();
+  }, 800);
+}
+
+async function loadCloudSave(userId) {
+  if (!supabaseClient || !authUser || authUser.id !== userId) return;
+  let result;
+  try {
+    result = await supabaseClient
+      .from("player_saves")
+      .select("save_data")
+      .eq("user_id", userId)
+      .maybeSingle();
+  } catch (error) {
+    showAccountMessage(`Cloud save failed: ${error.message}`);
+    return;
+  }
+  const { data, error } = result;
+  if (!authUser || authUser.id !== userId) return;
+  if (error) {
+    showAccountMessage(`Cloud save failed: ${error.message}`);
+    return;
+  }
+  if (data && data.save_data) {
+    mergeCloudSnapshot(data.save_data);
+    showAccountMessage("Cloud save synced");
+  } else {
+    showAccountMessage("Uploading this device's save");
+  }
+  queueCloudSave();
+}
+
+function handleAuthSession(session) {
+  const nextUser = session && session.user ? session.user : null;
+  if ((authUser && authUser.id) === (nextUser && nextUser.id)) {
+    authUser = nextUser;
+    return;
+  }
+  authUser = nextUser;
+  if (authUser) {
+    showAccountMessage("Loading cloud save");
+    const userId = authUser.id;
+    loadCloudSave(userId);
+  } else {
+    if (cloudSaveTimer !== null) clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = null;
+    showAccountMessage("Signed out");
+  }
+}
+
+function closeAuthDialog() {
+  const modal = document.getElementById("auth-modal");
+  if (modal) modal.hidden = true;
+}
+
+function openEmailAuth(mode) {
+  if (!supabaseClient) {
+    showAccountMessage("Configure Supabase in supabase-config.js first");
+    return;
+  }
+  const modal = document.getElementById("auth-modal");
+  const form = document.getElementById("auth-form");
+  const title = document.getElementById("auth-title");
+  const submit = document.getElementById("auth-submit");
+  const password = document.getElementById("auth-password");
+  const error = document.getElementById("auth-error");
+  if (!modal || !form || !title || !submit || !password || !error) {
+    showAccountMessage("Email sign-in form is unavailable");
+    return;
+  }
+  authFormMode = mode;
+  title.textContent = mode === "signup" ? "Create account" : "Sign in";
+  submit.textContent = mode === "signup" ? "Sign up" : "Sign in";
+  password.autocomplete = mode === "signup" ? "new-password" : "current-password";
+  error.textContent = "";
+  form.reset();
+  modal.hidden = false;
+  document.getElementById("auth-email").focus();
+}
+
+async function submitEmailAuth(event) {
+  event.preventDefault();
+  if (!supabaseClient) return;
+  const email = document.getElementById("auth-email").value.trim();
+  const password = document.getElementById("auth-password").value;
+  const errorEl = document.getElementById("auth-error");
+  const submit = document.getElementById("auth-submit");
+  submit.disabled = true;
+  errorEl.textContent = "";
+  let result;
+  try {
+    result = authFormMode === "signup"
+      ? await supabaseClient.auth.signUp({ email, password })
+      : await supabaseClient.auth.signInWithPassword({ email, password });
+  } catch (error) {
+    submit.disabled = false;
+    errorEl.textContent = error.message || "Authentication request failed";
+    return;
+  }
+  submit.disabled = false;
+  if (result.error) {
+    errorEl.textContent = result.error.message;
+    return;
+  }
+  closeAuthDialog();
+  showAccountMessage(
+    authFormMode === "signup" && !result.data.session
+      ? "Check your email to confirm your account"
+      : "Signed in"
+  );
+}
+
+async function signInWithProvider(provider) {
+  if (!supabaseClient) {
+    showAccountMessage("Configure Supabase in supabase-config.js first");
+    return;
+  }
+  try {
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: window.location.href },
+    });
+    if (error) showAccountMessage(`${provider} sign-in failed: ${error.message}`);
+  } catch (error) {
+    showAccountMessage(`${provider} sign-in failed: ${error.message}`);
+  }
+}
+
+async function signOutFromAccount() {
+  if (!supabaseClient || !authUser) {
+    showAccountMessage(authUser ? "Supabase is unavailable" : "You are not signed in");
+    return;
+  }
+  try {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) showAccountMessage(`Sign-out failed: ${error.message}`);
+  } catch (error) {
+    showAccountMessage(`Sign-out failed: ${error.message}`);
+  }
+}
+
+function initializeSupabase() {
+  const modal = document.getElementById("auth-modal");
+  const form = document.getElementById("auth-form");
+  const cancel = document.getElementById("auth-cancel");
+  if (form) form.addEventListener("submit", submitEmailAuth);
+  if (cancel) cancel.addEventListener("click", closeAuthDialog);
+  if (modal) {
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) closeAuthDialog();
+    });
+  }
+
+  const config = window.GD_SUPABASE_CONFIG;
+  if (!window.supabase || typeof window.supabase.createClient !== "function") {
+    showAccountMessage("Supabase library did not load");
+    return;
+  }
+  if (!config || !config.url || !config.anonKey) {
+    showAccountMessage("Set your Supabase URL and public key in supabase-config.js");
+    return;
+  }
+  try {
+    supabaseClient = window.supabase.createClient(config.url, config.anonKey);
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+      setTimeout(() => handleAuthSession(session), 0);
+    });
+  } catch (error) {
+    showAccountMessage(`Supabase setup failed: ${error.message}`);
+  }
+}
+
 function totalCoins(i) {
   return Object.keys(coinsGot[i] || {}).length;
 }
@@ -223,6 +500,8 @@ function resetPlayer(fromCp) {
 let inputHeld = false;
 let inputJustDown = false;
 let _inputWasDown = false;
+let touchMenuStart = null;
+let editorTouchPan = null;
 
 function iDown(e) {
   if (e) e.preventDefault();
@@ -237,6 +516,11 @@ const heldKeys = {};
 window.addEventListener("keydown", (e) => {
   heldKeys[e.code] = true;
   if (e.repeat) return;
+  const authModal = document.getElementById("auth-modal");
+  if (authModal && !authModal.hidden) {
+    if (e.code === "Escape") closeAuthDialog();
+    return;
+  }
   const c = e.code;
   if (gameState === "editor") {
     if (c === "Escape") {
@@ -295,10 +579,12 @@ window.addEventListener("keydown", (e) => {
 
   if (gameState === "menu") {
     const max = menuScreen === "main"
-      ? 4
+      ? 5
       : menuScreen === "levels"
         ? levels.length + editorLevels.length
-        : 9;
+        : menuScreen === "settings"
+          ? 9
+          : 5;
     if (c === "ArrowDown") menuSel = Math.min(menuSel + 1, max);
     if (c === "ArrowUp") menuSel = Math.max(menuSel - 1, 0);
     if (menuScreen === "levels" && (c === "ArrowDown" || c === "ArrowUp")) {
@@ -345,6 +631,10 @@ function tapHandler(x, y) {
     gameState = "playing";
     return;
   }
+  if (x > W - 100 && x < W - 55 && y < 50) {
+    gameState = "paused";
+    return;
+  }
   // Check mute button (top-right)
   if (x > W - 55 && y < 50) {
     muted = !muted;
@@ -374,9 +664,34 @@ canvas.addEventListener("mousemove", (e) => {
 canvas.addEventListener(
   "touchmove",
   (e) => {
+    const t = e.touches[0];
+    if (gameState === "menu" && menuScreen === "levels" && touchMenuStart) {
+      e.preventDefault();
+      const dy = touchMenuStart.startY - t.clientY;
+      if (Math.abs(dy) > 10) touchMenuStart.moved = true;
+      if (touchMenuStart.moved) {
+        const layout = levelMenuLayout();
+        levelMenuScroll = Math.max(
+          0,
+          Math.min(
+            layout.maxScroll,
+            touchMenuStart.scroll + Math.round(dy / layout.step)
+          )
+        );
+        touchMenuStart.x = t.clientX;
+        touchMenuStart.y = t.clientY;
+      }
+      return;
+    }
+    if (gameState === "editor" && e.touches.length >= 2) {
+      e.preventDefault();
+      const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      if (editorTouchPan) cameraX = Math.max(0, cameraX - (centerX - editorTouchPan.x));
+      editorTouchPan = { x: centerX };
+      return;
+    }
     if (gameState !== "editor" || !edPainting) return;
     e.preventDefault();
-    const t = e.touches[0];
     editorMouse.x = t.clientX;
     editorMouse.y = t.clientY;
     editorApply(t.clientX, t.clientY, edPaintErase);
@@ -410,7 +725,24 @@ canvas.addEventListener(
     editorMouse.x = t.clientX;
     editorMouse.y = t.clientY;
     if (gameState === "editor") {
+      if (e.touches.length >= 2) {
+        edPainting = false;
+        editorTouchPan = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        };
+        return;
+      }
       editorDown({ clientX: t.clientX, clientY: t.clientY, button: 0 });
+      return;
+    }
+    if (gameState === "menu" && menuScreen === "levels") {
+      touchMenuStart = {
+        x: t.clientX,
+        y: t.clientY,
+        startY: t.clientY,
+        scroll: levelMenuScroll,
+        moved: false,
+      };
       return;
     }
     tapHandler(t.clientX, t.clientY);
@@ -422,6 +754,13 @@ canvas.addEventListener(
   (e) => {
     e.preventDefault();
     edPainting = false;
+    if (e.touches.length < 2) editorTouchPan = null;
+    if (touchMenuStart) {
+      if (gameState === "menu" && menuScreen === "levels" && !touchMenuStart.moved) {
+        menuClickAt(touchMenuStart.x, touchMenuStart.y);
+      }
+      touchMenuStart = null;
+    }
     iUp();
   },
   { passive: false }
@@ -2092,6 +2431,12 @@ function drawHUD() {
   ctx.textAlign = "left";
   ctx.fillText("\u2190", 18, 34);
 
+  // Touch-friendly pause control
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.font = '20px "Segoe UI", system-ui, sans-serif';
+  ctx.fillText(gameState === "paused" ? "\u25B6" : "\u275A\u275A", W - 66, 34);
+
   // Mute button (top-right, bigger)
   ctx.textAlign = "right";
   ctx.fillStyle = "rgba(255,255,255,0.45)";
@@ -2349,32 +2694,41 @@ function drawMenu() {
   menuBtns = [];
 
   if (menuScreen === "main") {
+    const compact = H < 420;
     // Title with double glow
     ctx.save();
     ctx.shadowColor = "#00ff88";
     ctx.shadowBlur = 45;
     ctx.fillStyle = "#fff";
-    ctx.font = `bold ${Math.min(68, W * 0.085)}px "Segoe UI", system-ui, sans-serif`;
+    const titleSize = Math.min(68, W * 0.085, compact ? H * 0.08 : 68);
+    ctx.font = `bold ${titleSize}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText("GEOMETRY DASH", W / 2, H * 0.2);
+    ctx.fillText("GEOMETRY DASH", W / 2, compact ? H * 0.1 : H * 0.2, W * 0.94);
     ctx.restore();
 
     // Subtitle with accent
     ctx.fillStyle = "rgba(255,255,255,0.3)";
     ctx.font = `${Math.min(16, W * 0.02)}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText("A browser-based tribute  \u00B7  " + playerName, W / 2, H * 0.2 + 36, W * 0.8);
+    ctx.fillText(
+      "A browser-based tribute  \u00B7  " + playerName,
+      W / 2,
+      compact ? H * 0.2 : H * 0.2 + 36,
+      W * 0.8
+    );
 
     // Decorative line
     const lineW = Math.min(240, W * 0.3);
-    ctx.save();
-    ctx.strokeStyle = "rgba(0, 255, 136, 0.2)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(W / 2 - lineW / 2, H * 0.2 + 50);
-    ctx.lineTo(W / 2 + lineW / 2, H * 0.2 + 50);
-    ctx.stroke();
-    ctx.restore();
+    if (!compact) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(0, 255, 136, 0.2)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(W / 2 - lineW / 2, H * 0.2 + 50);
+      ctx.lineTo(W / 2 + lineW / 2, H * 0.2 + 50);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     const bw = Math.min(280, W * 0.4);
     const bx = W / 2 - bw / 2;
@@ -2390,10 +2744,15 @@ function drawMenu() {
         col: muted ? "#ff4444" : "#555",
       },
       { label: "\u2699  Settings", col: "#aa88ff" },
+      { label: "\u2605  Account", col: "#ffd43b" },
     ];
-    const bh = Math.min(54, Math.max(40, (H * 0.46) / items.length));
-    const gap = bh + 8;
-    const top = Math.min(H * 0.34, H - 28 - items.length * gap);
+    const bh = compact
+      ? Math.min(38, Math.max(30, H * 0.09))
+      : Math.min(54, Math.max(40, (H * 0.46) / items.length));
+    const gap = bh + (compact ? 4 : 8);
+    const top = compact
+      ? Math.min(H * 0.29, H - 24 - items.length * gap)
+      : Math.min(H * 0.34, H - 28 - items.length * gap);
     items.forEach((it, i) => {
       const by = top + i * gap;
       const hov = menuSel === i;
@@ -2535,12 +2894,17 @@ function drawMenu() {
     ctx.textAlign = "center";
     ctx.fillText("\u2190  Back", W / 2, backY + 28);
     menuBtns.push({ x: backBx, y: backY, w: backBw, h: bhBack, act: 99 });
-  } else {
+  } else if (menuScreen === "settings") {
     drawSettingsMenu();
+  } else {
+    drawAccountMenu();
   }
 }
 
 function drawSettingsMenu() {
+  const compact = H < 400;
+  const rowHeight = compact ? 34 : 48;
+  const actionHeight = compact ? 34 : 42;
   ctx.save();
   ctx.shadowColor = "#aa88ff";
   ctx.shadowBlur = 18;
@@ -2580,7 +2944,7 @@ function drawSettingsMenu() {
   const bw = Math.min(420, W * 0.78);
   const bx = W / 2 - bw / 2;
   const buttons = [
-    { id: 0, label: "Username: " + playerName, y: H * 0.24 },
+    { id: 0, label: "Username: " + playerName, y: H * 0.23 },
     {
       id: 1,
       label: "Appearance: " + PLAYER_SKINS.find((skin) => skin.id === playerSkin).label,
@@ -2592,26 +2956,30 @@ function drawSettingsMenu() {
     ctx.fillStyle = hov ? "rgba(170,136,255,0.22)" : "rgba(255,255,255,0.04)";
     ctx.strokeStyle = hov ? "#aa88ff" : "rgba(255,255,255,0.22)";
     ctx.lineWidth = hov ? 2 : 1;
-    rRect(bx, button.y, bw, 48, 10);
+    rRect(bx, button.y, bw, rowHeight, 10);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#fff";
-    ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+    ctx.font = `bold ${compact ? 13 : 16}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText(button.label, W / 2, button.y + 30, bw - 24);
-    menuBtns.push({ x: bx, y: button.y, w: bw, h: 48, act: button.id });
+    ctx.fillText(button.label, W / 2, button.y + rowHeight * 0.64, bw - 24);
+    menuBtns.push({ x: bx, y: button.y, w: bw, h: rowHeight, act: button.id });
   });
 
   ctx.fillStyle = "rgba(255,255,255,0.65)";
   ctx.font = '14px "Segoe UI", system-ui, sans-serif';
   ctx.textAlign = "center";
-  ctx.fillText("Choose a color  \u00B7  " + playerColor, W / 2, H * 0.50);
+  ctx.fillText("Choose a color  \u00B7  " + playerColor, W / 2, H * 0.48);
 
   const gap = 9;
-  const swatchSize = Math.min(48, (W - 40 - gap * (PLAYER_COLORS.length - 1)) / PLAYER_COLORS.length);
+  const swatchSize = Math.min(
+    48,
+    H * 0.1,
+    (W - 40 - gap * (PLAYER_COLORS.length - 1)) / PLAYER_COLORS.length
+  );
   const rowWidth = PLAYER_COLORS.length * swatchSize + (PLAYER_COLORS.length - 1) * gap;
   const startX = (W - rowWidth) / 2;
-  const swatchY = H * 0.53;
+  const swatchY = H * 0.52;
   PLAYER_COLORS.forEach((color, i) => {
     const x = startX + i * (swatchSize + gap);
     const selected = playerColor === color.value;
@@ -2624,11 +2992,11 @@ function drawSettingsMenu() {
     ctx.stroke();
     ctx.fillStyle = "rgba(255,255,255,0.75)";
     ctx.font = '10px "Segoe UI", system-ui, sans-serif';
-    ctx.fillText(color.label, x + swatchSize / 2, swatchY + swatchSize + 16);
+    ctx.fillText(color.label, x + swatchSize / 2, swatchY + swatchSize + 14);
     menuBtns.push({ x, y: swatchY, w: swatchSize, h: swatchSize, act: i + 2 });
   });
 
-  const custom = { x: W / 2 - 100, y: H * 0.66, w: 200, h: 42, act: 8 };
+  const custom = { x: W / 2 - 100, y: H * 0.68, w: 200, h: actionHeight, act: 8 };
   ctx.fillStyle = menuSel === custom.act ? "rgba(170,136,255,0.22)" : "rgba(255,255,255,0.04)";
   ctx.strokeStyle = "#aa88ff";
   ctx.lineWidth = menuSel === custom.act ? 2 : 1;
@@ -2637,10 +3005,11 @@ function drawSettingsMenu() {
   ctx.stroke();
   ctx.fillStyle = "#fff";
   ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
-  ctx.fillText("Custom color", W / 2, custom.y + 27);
+  ctx.font = `bold ${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
+  ctx.fillText("Custom color", W / 2, custom.y + custom.h * 0.65);
   menuBtns.push(custom);
 
-  const back = { x: W / 2 - 100, y: H * 0.79, w: 200, h: 42, act: 9 };
+  const back = { x: W / 2 - 100, y: H * 0.88, w: 200, h: actionHeight, act: 9 };
   ctx.fillStyle = menuSel === back.act ? "#aa88ff" : "rgba(255,255,255,0.04)";
   ctx.strokeStyle = "#aa88ff";
   ctx.lineWidth = menuSel === back.act ? 2 : 1;
@@ -2649,16 +3018,67 @@ function drawSettingsMenu() {
   ctx.stroke();
   ctx.fillStyle = menuSel === back.act ? "#101018" : "#fff";
   ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
-  ctx.fillText("\u2190  Back", W / 2, back.y + 27);
+  ctx.font = `bold ${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
+  ctx.fillText("\u2190  Back", W / 2, back.y + back.h * 0.65);
   menuBtns.push(back);
 
   if (settingsMessageT > 0) {
     settingsMessageT--;
     ctx.fillStyle = settingsMessage.includes("couldn't") ? "#ff8c8c" : "#78ffb4";
     ctx.font = '13px "Segoe UI", system-ui, sans-serif';
-    ctx.fillText(settingsMessage, W / 2, H * 0.75);
+    ctx.fillText(settingsMessage, W / 2, H * 0.84);
   }
   ctx.restore();
+}
+
+function drawAccountMenu() {
+  const compact = H < 400;
+  const rowHeight = Math.min(44, Math.max(28, H * 0.1));
+  const gap = rowHeight + (compact ? 3 : 8);
+  const bw = Math.min(420, W * 0.78);
+  const bx = W / 2 - bw / 2;
+  const actions = [
+    { label: "Email sign up", color: "#44ddff" },
+    { label: "Email sign in", color: "#44ddff" },
+    { label: "Continue with Google", color: "#4285f4" },
+    { label: "Continue with Apple", color: "#aaaaaa" },
+    { label: "Sign out", color: "#ff6b6b" },
+    { label: "\u2190  Back", color: "#aa88ff" },
+  ];
+  const top = Math.min(H * 0.32, H - actions.length * gap - 12);
+
+  ctx.save();
+  ctx.shadowColor = "#ffd43b";
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = "#fff";
+  ctx.font = `bold ${Math.min(42, W * 0.055)}px "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText("Account", W / 2, H * 0.1);
+  ctx.restore();
+
+  const identity = authUser ? `Signed in: ${authUser.email || "account"}` : "Not signed in";
+  ctx.fillStyle = "rgba(255,255,255,0.82)";
+  ctx.font = `${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText(identity, W / 2, H * 0.19, W * 0.9);
+  ctx.fillStyle = "rgba(255,255,255,0.58)";
+  ctx.font = `${compact ? 11 : 13}px "Segoe UI", system-ui, sans-serif`;
+  ctx.fillText(accountMessage, W / 2, H * 0.245, W * 0.92);
+
+  actions.forEach((action, index) => {
+    const y = top + index * gap;
+    const selected = menuSel === index;
+    ctx.fillStyle = selected ? colorAlpha(action.color, 0.24) : "rgba(255,255,255,0.04)";
+    ctx.strokeStyle = action.color;
+    ctx.lineWidth = selected ? 2 : 1;
+    rRect(bx, y, bw, rowHeight, 9);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = `bold ${compact ? 13 : 16}px "Segoe UI", system-ui, sans-serif`;
+    ctx.fillText(action.label, W / 2, y + rowHeight * 0.65, bw - 24);
+    menuBtns.push({ x: bx, y, w: bw, h: rowHeight, act: index });
+  });
 }
 
 function menuAction() {
@@ -2674,6 +3094,9 @@ function menuAction() {
       menuScreen = "settings";
       menuSel = 0;
       settingsMessage = "";
+    } else if (menuSel === 5) {
+      menuScreen = "account";
+      menuSel = 0;
     }
   } else if (menuScreen === "settings") {
     if (menuSel === 0) changePlayerName();
@@ -2697,6 +3120,16 @@ function menuAction() {
       menuScreen = "main";
       menuSel = 0;
     }
+  } else if (menuScreen === "account") {
+    if (menuSel === 0) openEmailAuth("signup");
+    else if (menuSel === 1) openEmailAuth("signin");
+    else if (menuSel === 2) signInWithProvider("google");
+    else if (menuSel === 3) signInWithProvider("apple");
+    else if (menuSel === 4) signOutFromAccount();
+    else if (menuSel === 5) {
+      menuScreen = "main";
+      menuSel = 0;
+    }
   } else {
     const count = levels.length + editorLevels.length;
     if (menuSel < count) selectMenuLevel(menuSel);
@@ -2711,10 +3144,10 @@ function menuAction() {
 function menuClickAt(mx, my) {
   for (const b of menuBtns) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      if (menuScreen === "main" && b.act < 5) {
+      if (menuScreen === "main" && b.act < 6) {
         menuSel = b.act;
         menuAction();
-      } else if (menuScreen === "settings") {
+      } else if (menuScreen === "settings" || menuScreen === "account") {
         menuSel = b.act;
         menuAction();
       } else if (b.act >= 10 && b.act < 10 + levels.length + editorLevels.length)
@@ -3049,7 +3482,9 @@ function saveEditor() {
     data.name = edName;
     editorLevels[edSlot] = data;
   }
-  edMsg = persistEditorStore() ? "Saved" : "Save failed - storage unavailable";
+  const saved = persistEditorStore();
+  if (saved) queueCloudSave();
+  edMsg = saved ? "Saved" : "Save failed - storage unavailable";
   edMsgT = 70;
 }
 
@@ -3066,7 +3501,9 @@ function renameEditorLevel() {
   if (edSlot != null && editorLevels[edSlot]) {
     editorLevels[edSlot].name = edName;
   }
-  edMsg = persistEditorStore()
+  const saved = persistEditorStore();
+  if (saved && edSlot != null) queueCloudSave();
+  edMsg = saved
     ? "Name updated"
     : "Name changed, but storage is unavailable";
   edMsgT = 70;
@@ -3099,11 +3536,12 @@ function deleteEditorSlot(i) {
     edSlot = null;
     edName = "Untitled";
   } else if (edSlot != null && edSlot > i) edSlot--;
-  persistEditorStore();
+  if (persistEditorStore()) queueCloudSave();
 }
 
 function editorBarH() {
-  return editorToolGeom().rows > 1 ? 78 : 52;
+  const g = editorToolGeom();
+  return g.rows > 1 ? g.rows * (g.h + g.gap) + 12 : 52;
 }
 function editorTopH() {
   return editorLevels.length ? 72 : 42;
@@ -3359,4 +3797,5 @@ function loop(ts) {
   requestAnimationFrame(loop);
 }
 
+initializeSupabase();
 requestAnimationFrame(loop);

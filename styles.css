@@ -22,3 +22,87 @@ canvas {
   cursor: pointer;
   image-rendering: auto;
 }
+
+.auth-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.auth-modal[hidden] {
+  display: none;
+}
+
+.auth-card {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 380px);
+  padding: 24px;
+  color: #fff;
+  background: #11111e;
+  border: 1px solid rgba(170, 136, 255, 0.55);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.auth-card h2 {
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.auth-card label {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.auth-card input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  color: #fff;
+  background: #080811;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.auth-card input:focus-visible,
+.auth-actions button:focus-visible {
+  outline: 2px solid #aa88ff;
+  outline-offset: 2px;
+}
+
+#auth-error {
+  min-height: 18px;
+  color: #ff9a9a;
+  font-size: 13px;
+}
+
+.auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.auth-actions button {
+  min-height: 42px;
+  padding: 0 16px;
+  color: #fff;
+  background: #24243a;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.auth-actions button[type="submit"] {
+  color: #120d20;
+  background: #aa88ff;
+  border-color: #aa88ff;
+  font-weight: 700;
+}
