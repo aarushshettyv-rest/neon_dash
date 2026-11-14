@@ -3017,7 +3017,7 @@ function drawSettingsMenu() {
   ctx.stroke();
   ctx.fillStyle = "#fff";
   ctx.font = `bold ${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
-  ctx.fillText("Custom color", W / 2, custom.y + custom.h * 0.65);
+  ctx.fillText("Custom color", custom.x + custom.w / 2, custom.y + custom.h * 0.65);
   menuBtns.push(custom);
 
   const account = {

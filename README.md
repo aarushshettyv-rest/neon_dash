@@ -41,7 +41,7 @@ Or simply open `index.html` directly in a browser.
 2. In `supabase-config.js`, set `url` to the project URL and `anonKey` to the project's publishable key (or legacy anon key). These browser values are public; **never use a `service_role` key**.
 3. In Supabase Authentication settings, enable Email, then add your local and deployed site URLs to the allowed redirect URLs (for example `http://localhost:8000/**` and your Vercel site URL).
 4. Configure Google and/or Apple credentials in the corresponding Supabase Auth provider settings to enable those buttons. OAuth sign-in will not work until the provider and its redirect URLs are configured.
-5. Serve the folder over HTTP (for example, `python -m http.server 8000`) and reload the game. Use **Account** on the main menu to sign up or sign in.
+5. Serve the folder over HTTP (for example, `python -m http.server 8000`) and reload the game. Open **Settings → Account** to sign up, sign in, or sign out.
 
 The game continues to use local storage while signed out. After sign-in, it merges progress and coin records, combines saved custom levels while retaining different same-name versions, and syncs the player profile. Email confirmation may be required based on the project's Auth settings. The Supabase JavaScript client is loaded from jsDelivr, so the page needs an internet connection for account features.
 
@@ -50,7 +50,7 @@ The game continues to use local storage while signed out. After sign-in, it merg
 - `index.html` — entry point
 - `game.js` — all game logic
 - `styles.css` — canvas styling
-- `supabase-config.js` — public Supabase project URL and key placeholders
+- `supabase-config.js` — public Supabase project URL and publishable key
 - `supabase/schema.sql` — per-user cloud-save table and row-level security
 - `actions.json` — scripted input sequence (for automated testing/playback)
 
