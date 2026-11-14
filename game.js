@@ -554,8 +554,13 @@ window.addEventListener("keydown", (e) => {
 
   if (c === "Escape") {
     if (gameState === "menu" && menuScreen !== "main") {
-      menuScreen = "main";
-      menuSel = 0;
+      if (menuScreen === "account") {
+        menuScreen = "settings";
+        menuSel = 9;
+      } else {
+        menuScreen = "main";
+        menuSel = 0;
+      }
       return;
     }
     if (editorTesting && (gameState === "playing" || gameState === "paused" || gameState === "dead" || gameState === "complete")) {
@@ -579,11 +584,11 @@ window.addEventListener("keydown", (e) => {
 
   if (gameState === "menu") {
     const max = menuScreen === "main"
-      ? 5
+      ? 4
       : menuScreen === "levels"
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
-          ? 9
+          ? 10
           : 5;
     if (c === "ArrowDown") menuSel = Math.min(menuSel + 1, max);
     if (c === "ArrowUp") menuSel = Math.max(menuSel - 1, 0);
@@ -2744,7 +2749,6 @@ function drawMenu() {
         col: muted ? "#ff4444" : "#555",
       },
       { label: "\u2699  Settings", col: "#aa88ff" },
-      { label: "\u2605  Account", col: "#ffd43b" },
     ];
     const bh = compact
       ? Math.min(38, Math.max(30, H * 0.09))
@@ -2996,7 +3000,15 @@ function drawSettingsMenu() {
     menuBtns.push({ x, y: swatchY, w: swatchSize, h: swatchSize, act: i + 2 });
   });
 
-  const custom = { x: W / 2 - 100, y: H * 0.68, w: 200, h: actionHeight, act: 8 };
+  const actionWidth = Math.min(190, (bw - 10) / 2);
+  const actionY = H * 0.68;
+  const custom = {
+    x: W / 2 - actionWidth - 5,
+    y: actionY,
+    w: actionWidth,
+    h: actionHeight,
+    act: 8,
+  };
   ctx.fillStyle = menuSel === custom.act ? "rgba(170,136,255,0.22)" : "rgba(255,255,255,0.04)";
   ctx.strokeStyle = "#aa88ff";
   ctx.lineWidth = menuSel === custom.act ? 2 : 1;
@@ -3004,12 +3016,29 @@ function drawSettingsMenu() {
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = "#fff";
-  ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
   ctx.font = `bold ${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
   ctx.fillText("Custom color", W / 2, custom.y + custom.h * 0.65);
   menuBtns.push(custom);
 
-  const back = { x: W / 2 - 100, y: H * 0.88, w: 200, h: actionHeight, act: 9 };
+  const account = {
+    x: W / 2 + 5,
+    y: actionY,
+    w: actionWidth,
+    h: actionHeight,
+    act: 9,
+  };
+  ctx.fillStyle = menuSel === account.act ? "rgba(255,212,59,0.24)" : "rgba(255,255,255,0.04)";
+  ctx.strokeStyle = "#ffd43b";
+  ctx.lineWidth = menuSel === account.act ? 2 : 1;
+  rRect(account.x, account.y, account.w, account.h, 9);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.font = `bold ${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
+  ctx.fillText("Account", W / 2 + actionWidth / 2 + 5, account.y + account.h * 0.65);
+  menuBtns.push(account);
+
+  const back = { x: W / 2 - 100, y: H * 0.88, w: 200, h: actionHeight, act: 10 };
   ctx.fillStyle = menuSel === back.act ? "#aa88ff" : "rgba(255,255,255,0.04)";
   ctx.strokeStyle = "#aa88ff";
   ctx.lineWidth = menuSel === back.act ? 2 : 1;
@@ -3094,9 +3123,6 @@ function menuAction() {
       menuScreen = "settings";
       menuSel = 0;
       settingsMessage = "";
-    } else if (menuSel === 5) {
-      menuScreen = "account";
-      menuSel = 0;
     }
   } else if (menuScreen === "settings") {
     if (menuSel === 0) changePlayerName();
@@ -3117,6 +3143,9 @@ function menuAction() {
         }
       }
     } else if (menuSel === 9) {
+      menuScreen = "account";
+      menuSel = 0;
+    } else if (menuSel === 10) {
       menuScreen = "main";
       menuSel = 0;
     }
@@ -3127,8 +3156,8 @@ function menuAction() {
     else if (menuSel === 3) signInWithProvider("apple");
     else if (menuSel === 4) signOutFromAccount();
     else if (menuSel === 5) {
-      menuScreen = "main";
-      menuSel = 0;
+      menuScreen = "settings";
+      menuSel = 9;
     }
   } else {
     const count = levels.length + editorLevels.length;
@@ -3144,7 +3173,7 @@ function menuAction() {
 function menuClickAt(mx, my) {
   for (const b of menuBtns) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      if (menuScreen === "main" && b.act < 6) {
+      if (menuScreen === "main" && b.act < 5) {
         menuSel = b.act;
         menuAction();
       } else if (menuScreen === "settings" || menuScreen === "account") {
