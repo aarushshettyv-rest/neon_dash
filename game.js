@@ -376,22 +376,6 @@ async function submitEmailAuth(event) {
   );
 }
 
-async function signInWithProvider(provider) {
-  if (!supabaseClient) {
-    showAccountMessage("Configure Supabase in supabase-config.js first");
-    return;
-  }
-  try {
-    const { error } = await supabaseClient.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: window.location.href },
-    });
-    if (error) showAccountMessage(`${provider} sign-in failed: ${error.message}`);
-  } catch (error) {
-    showAccountMessage(`${provider} sign-in failed: ${error.message}`);
-  }
-}
-
 async function signOutFromAccount() {
   if (!supabaseClient || !authUser) {
     showAccountMessage(authUser ? "Supabase is unavailable" : "You are not signed in");
@@ -589,7 +573,7 @@ window.addEventListener("keydown", (e) => {
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
           ? 10
-          : 5;
+          : 4;
     if (c === "ArrowDown") menuSel = Math.min(menuSel + 1, max);
     if (c === "ArrowUp") menuSel = Math.max(menuSel - 1, 0);
     if (menuScreen === "levels" && (c === "ArrowDown" || c === "ArrowUp")) {
@@ -3069,8 +3053,7 @@ function drawAccountMenu() {
   const actions = [
     { label: "Email sign up", color: "#44ddff" },
     { label: "Email sign in", color: "#44ddff" },
-    { label: "Continue with Google", color: "#4285f4" },
-    { label: "Continue with Apple", color: "#aaaaaa" },
+    { label: "Continue with Google", color: "#777777", comingSoon: true },
     { label: "Sign out", color: "#ff6b6b" },
     { label: "\u2190  Back", color: "#aa88ff" },
   ];
@@ -3103,7 +3086,7 @@ function drawAccountMenu() {
     rRect(bx, y, bw, rowHeight, 9);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = action.comingSoon ? "rgba(255,255,255,0.5)" : "#fff";
     ctx.font = `bold ${compact ? 13 : 16}px "Segoe UI", system-ui, sans-serif`;
     ctx.fillText(action.label, W / 2, y + rowHeight * 0.65, bw - 24);
     menuBtns.push({ x: bx, y, w: bw, h: rowHeight, act: index });
@@ -3152,10 +3135,9 @@ function menuAction() {
   } else if (menuScreen === "account") {
     if (menuSel === 0) openEmailAuth("signup");
     else if (menuSel === 1) openEmailAuth("signin");
-    else if (menuSel === 2) signInWithProvider("google");
-    else if (menuSel === 3) signInWithProvider("apple");
-    else if (menuSel === 4) signOutFromAccount();
-    else if (menuSel === 5) {
+    else if (menuSel === 2) window.alert("Google sign-in is coming soon!");
+    else if (menuSel === 3) signOutFromAccount();
+    else if (menuSel === 4) {
       menuScreen = "settings";
       menuSel = 9;
     }

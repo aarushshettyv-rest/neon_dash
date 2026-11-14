@@ -26,7 +26,7 @@ Project goal: Build an original neon rhythm platformer with a menu, three levels
 
 ## Supabase scaffold
 
-- Added an Account menu with email/password sign-up and sign-in, Google and Apple OAuth buttons, plus sign-out.
+- Added an Account menu with email/password sign-up and sign-in plus sign-out. Google is shown as a coming-soon option; Apple sign-in is not offered.
 - Added per-user cloud saves for progress, coins, player profile, and saved custom levels; local saves remain available while signed out.
 - Added `supabase/schema.sql` with row-level security and a public-key-only config placeholder in `supabase-config.js`.
 - Documented project setup, auth providers, redirect URLs, and safe key handling in `README.md`.
@@ -34,6 +34,7 @@ Project goal: Build an original neon rhythm platformer with a menu, three levels
 ## Supabase verification and setup still needed
 
 - `node --check game.js` and `git diff --check` (with Windows CRLF handling) pass.
-- Mocked Supabase smoke tests passed for account navigation, email sign-up, cloud merge/upload, Google OAuth invocation, and sign-out.
+- Mocked Supabase smoke tests passed for account navigation, email sign-up, cloud merge/upload, and sign-out.
 - Account menu layout passed mocked checks at nine phone/tablet viewport sizes.
-- Create/configure the Supabase project, run the SQL schema, add provider credentials and redirect URLs, then verify email and OAuth flows against that project.
+- Email sign-in and cloud saves were confirmed working in the deployed game; custom-level sync was also confirmed in a separate browser session.
+- Google OAuth remains future work; Apple sign-in is not currently offered.
