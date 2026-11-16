@@ -568,7 +568,7 @@ window.addEventListener("keydown", (e) => {
 
   if (gameState === "menu") {
     const max = menuScreen === "main"
-      ? 4
+      ? 5
       : menuScreen === "levels"
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
@@ -2733,6 +2733,7 @@ function drawMenu() {
         col: muted ? "#ff4444" : "#555",
       },
       { label: "\u2699  Settings", col: "#aa88ff" },
+      { label: "\u2709  Get Updates", col: "#ffd43b" },
     ];
     const bh = compact
       ? Math.min(38, Math.max(30, H * 0.09))
@@ -3106,7 +3107,7 @@ function menuAction() {
       menuScreen = "settings";
       menuSel = 0;
       settingsMessage = "";
-    }
+    } else if (menuSel === 5) window.location.href = "updates.html";
   } else if (menuScreen === "settings") {
     if (menuSel === 0) changePlayerName();
     else if (menuSel === 1) {
@@ -3155,7 +3156,7 @@ function menuAction() {
 function menuClickAt(mx, my) {
   for (const b of menuBtns) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      if (menuScreen === "main" && b.act < 5) {
+      if (menuScreen === "main" && b.act < 6) {
         menuSel = b.act;
         menuAction();
       } else if (menuScreen === "settings" || menuScreen === "account") {
@@ -3499,6 +3500,118 @@ function saveEditor() {
   edMsgT = 70;
 }
 
+function exportEditorFile() {
+  const safeName = (edName || "custom-level")
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "custom-level";
+  const fileData = {
+    format: "neon-dash-custom-level",
+    version: 1,
+    name: edName.trim().slice(0, 40) || "Untitled",
+    objs: edObjs,
+  };
+  const blob = new Blob([JSON.stringify(fileData, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeName}.ndcl`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  edMsg = "Downloaded " + link.download;
+  edMsgT = 70;
+}
+
+function importEditorFileContents(contents) {
+  let fileData;
+  try {
+    fileData = JSON.parse(contents);
+  } catch (error) {
+    edMsg = "Invalid level file: not valid JSON";
+    edMsgT = 70;
+    return;
+  }
+  if (
+    !fileData ||
+    fileData.format !== "neon-dash-custom-level" ||
+    fileData.version !== 1 ||
+    typeof fileData.name !== "string" ||
+    !fileData.name.trim() ||
+    !Array.isArray(fileData.objs) ||
+    fileData.objs.length > 10000
+  ) {
+    edMsg = "Invalid or unsupported .ndcl file";
+    edMsgT = 70;
+    return;
+  }
+
+  const validTypes = new Set(ED_TOOLS.filter((tool) => tool.id !== "erase").map((tool) => tool.id));
+  const importedObjects = [];
+  for (const object of fileData.objs) {
+    if (
+      !object ||
+      !validTypes.has(object.type) ||
+      !Number.isSafeInteger(object.gx) ||
+      object.gx < 0 ||
+      object.gx > 50000 ||
+      !Number.isSafeInteger(object.gy) ||
+      object.gy < 0 ||
+      object.gy > 100
+    ) {
+      edMsg = "Invalid object data in .ndcl file";
+      edMsgT = 70;
+      return;
+    }
+    importedObjects.push({
+      type: object.type,
+      gx: object.gx,
+      gy: object.gy,
+    });
+  }
+
+  if ((edObjs.length || edName !== "Untitled" || edSlot !== null) &&
+      !window.confirm("Importing replaces the current editor level. Continue?")) {
+    return;
+  }
+
+  edObjs = importedObjects;
+  edName = fileData.name.trim().slice(0, 40);
+  edSlot = null;
+  edUndoStack = [];
+  cameraX = 0;
+  const saved = persistEditorStore();
+  edMsg = saved ? "Imported " + edName : "Imported, but could not save locally";
+  edMsgT = 70;
+}
+
+function handleEditorFileSelection(event) {
+  const input = event.currentTarget;
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+  if (file.size > 1024 * 1024) {
+    edMsg = "Level file is too large (1 MB max)";
+    edMsgT = 70;
+    return;
+  }
+  file.text()
+    .then(importEditorFileContents)
+    .catch((error) => {
+      edMsg = "Could not read level file: " + error.message;
+      edMsgT = 70;
+    });
+}
+
+function initializeEditorFileTransfer() {
+  const input = document.getElementById("level-file-input");
+  if (input) input.addEventListener("change", handleEditorFileSelection);
+}
+
 function renameEditorLevel() {
   const name = window.prompt("Level name:", edName);
   if (name === null) return;
@@ -3587,12 +3700,18 @@ function editorTopClick(mx, my) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
       if (b.id === "play") playEditor();
       else if (b.id === "save") saveEditor();
+      else if (b.id === "export") exportEditorFile();
+      else if (b.id === "import") {
+        const input = document.getElementById("level-file-input");
+        if (input) input.click();
+      }
       else if (b.id === "new") newEditorLevel();
       else if (b.id === "exit") goToMenu();
       return;
     }
   }
-  if (my < 40 && mx < W - (4 * (64 + 6) + 12)) {
+  const firstButtonX = buttons.length ? buttons[0].x : W;
+  if (my < 40 && mx < firstButtonX) {
     renameEditorLevel();
     return;
   }
@@ -3611,10 +3730,13 @@ function editorHeaderButtons() {
   const labels = [
     { id: "play", label: "Play", col: "#00ff88" },
     { id: "save", label: "Save", col: "#44ddff" },
+    { id: "export", label: "Export", col: "#66ddff" },
+    { id: "import", label: "Import", col: "#cc88ff" },
     { id: "new", label: "New", col: "#ffcc44" },
     { id: "exit", label: "Exit", col: "#ff5566" },
   ];
-  const w = 64;
+  const gap = W < 500 ? 3 : 6;
+  const w = Math.min(64, Math.floor((W - 12 - gap * (labels.length - 1)) / labels.length));
   const h = 26;
   const y = 8;
   return labels.map((b, i) => ({
@@ -3622,7 +3744,7 @@ function editorHeaderButtons() {
     w,
     h,
     y,
-    x: W - 12 - (labels.length - i) * (w + 6),
+    x: W - 6 - (labels.length - i) * (w + gap),
   }));
 }
 
@@ -3809,4 +3931,5 @@ function loop(ts) {
 }
 
 initializeSupabase();
+initializeEditorFileTransfer();
 requestAnimationFrame(loop);

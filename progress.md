@@ -5,6 +5,7 @@ Project goal: Build an original neon rhythm platformer with a menu, three levels
 - Built the canvas game with three hand-authored levels, gameplay controls, audio, stats, practice checkpoints, pause/menu navigation, and fullscreen support.
 - Tuned obstacle spacing and platform placement; added ceiling spikes and redesigned a flight section.
 - Added an editor with placement tools, erase, pan, undo, save/load, naming, and play-testing.
+- Added `.ndcl` custom-level file export/import with input validation and responsive editor header buttons.
 - Added saved custom levels to the Play menu, including scrolling selection and custom-level progress tracking.
 - Added player settings for username, cube/diamond/circle appearance, and preset or custom color; profile choices persist locally.
 - Improved phone/tablet usability with responsive editor toolbars, touch scrolling for saved levels, two-finger editor panning, and an on-screen pause control.
