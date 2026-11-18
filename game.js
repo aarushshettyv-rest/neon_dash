@@ -83,6 +83,14 @@ let trail = [];
 let bestProg = {};
 let totalAttempts = {};
 let coinsGot = {};
+let bestGhosts = {};
+const GHOST_SAMPLE_FRAMES = 3;
+const MAX_GHOST_POINTS = 6000;
+const GHOST_STORAGE_KEY = "gd_ghosts";
+let activeGhostKey = null;
+let ghostFrame = 0;
+let runGhostPoints = [];
+let ghostRunGroundY = 0;
 let supabaseClient = null;
 let authUser = null;
 let cloudSaveTimer = null;
@@ -120,6 +128,14 @@ try {
   if (PLAYER_SKINS.some((skin) => skin.id === profile.skin)) playerSkin = profile.skin;
   if (typeof profile.color === "string" && /^#[0-9a-f]{6}$/i.test(profile.color)) {
     playerColor = profile.color.toUpperCase();
+  }
+} catch (e) {}
+try {
+  const ghosts = JSON.parse(localStorage.getItem("gd_ghosts") || "{}");
+  if (ghosts && typeof ghosts === "object" && !Array.isArray(ghosts)) {
+    for (const [key, ghost] of Object.entries(ghosts)) {
+      if (isValidGhost(ghost)) bestGhosts[key] = ghost;
+    }
   }
 } catch (e) {}
 
@@ -1339,6 +1355,8 @@ function onViewport() {
   if (dy && gameState !== "menu" && gameState !== "editor") {
     P.y += dy;
     for (const cp of checkpoints) cp.y += dy;
+    ghostRunGroundY += dy;
+    for (const point of runGhostPoints) point[2] += dy;
   }
 }
 
@@ -1436,6 +1454,146 @@ function getProgress() {
   );
 }
 
+// -------------------- Ghost replay --------------------
+function isValidGhost(ghost) {
+  if (
+    !ghost ||
+    typeof ghost !== "object" ||
+    (ghost.mode !== "practice" && ghost.mode !== "editor") ||
+    !Number.isInteger(ghost.progress) ||
+    ghost.progress < 0 ||
+    ghost.progress > 100 ||
+    typeof ghost.completed !== "boolean" ||
+    !Number.isInteger(ghost.frames) ||
+    ghost.frames < 0 ||
+    !Number.isFinite(ghost.groundY) ||
+    !Array.isArray(ghost.points) ||
+    ghost.points.length < 2 ||
+    ghost.points.length > MAX_GHOST_POINTS
+  ) return false;
+
+  let lastFrame = -1;
+  return ghost.points.every((point) => {
+    if (
+      !Array.isArray(point) ||
+      point.length !== 5 ||
+      !Number.isInteger(point[0]) ||
+      point[0] <= lastFrame ||
+      !Number.isFinite(point[1]) ||
+      !Number.isFinite(point[2]) ||
+      !Number.isFinite(point[3]) ||
+      (point[4] !== 0 && point[4] !== 1)
+    ) return false;
+    lastFrame = point[0];
+    return true;
+  });
+}
+
+function getGhostKey() {
+  return levelData
+    ? String(currentLevelIdx) + ":" + (editorTesting ? "editor" : "practice")
+    : null;
+}
+
+function persistGhosts() {
+  try {
+    localStorage.setItem(GHOST_STORAGE_KEY, JSON.stringify(bestGhosts));
+    return true;
+  } catch (e) {
+    console.warn("Couldn't save ghost replay", e);
+    return false;
+  }
+}
+
+function clearGhostForLevel(key) {
+  const prefix = key + ":";
+  for (const ghostKey of Object.keys(bestGhosts)) {
+    if (ghostKey === key || ghostKey.startsWith(prefix)) delete bestGhosts[ghostKey];
+  }
+  persistGhosts();
+}
+
+function shiftCustomGhostsAfterDelete(deletedIndex) {
+  const shifted = {};
+  for (const [key, ghost] of Object.entries(bestGhosts)) {
+    const match = /^c(\d+)(:.*)?$/.exec(key);
+    if (!match) {
+      shifted[key] = ghost;
+      continue;
+    }
+    const index = Number(match[1]);
+    if (index < deletedIndex) shifted[key] = ghost;
+    else if (index > deletedIndex) shifted["c" + (index - 1) + (match[2] || "")] = ghost;
+  }
+  bestGhosts = shifted;
+  persistGhosts();
+}
+
+function beginGhostRun() {
+  activeGhostKey = practiceMode || editorTesting ? getGhostKey() : null;
+  ghostFrame = 0;
+  ghostRunGroundY = groundY;
+  runGhostPoints = [];
+  if (activeGhostKey) {
+    runGhostPoints.push([0, P.x, P.y, P.rot, P.isShip ? 1 : 0]);
+  }
+}
+
+function recordGhostFrame() {
+  if (!activeGhostKey) return;
+  ghostFrame++;
+  if (ghostFrame % GHOST_SAMPLE_FRAMES === 0 && runGhostPoints.length < MAX_GHOST_POINTS) {
+    runGhostPoints.push([ghostFrame, P.x, P.y, P.rot, P.isShip ? 1 : 0]);
+  }
+}
+
+function finishGhostRun(completed) {
+  if (!activeGhostKey) return;
+  const progress = completed ? 100 : getProgress();
+  const last = runGhostPoints[runGhostPoints.length - 1];
+  const finalPoint = [ghostFrame, P.x, P.y, P.rot, P.isShip ? 1 : 0];
+  if (last && last[0] === ghostFrame) runGhostPoints[runGhostPoints.length - 1] = finalPoint;
+  else if (runGhostPoints.length < MAX_GHOST_POINTS) runGhostPoints.push(finalPoint);
+  else runGhostPoints[runGhostPoints.length - 1] = finalPoint;
+
+  const previous = bestGhosts[activeGhostKey];
+  if (
+    runGhostPoints.length > 1 &&
+    (!previous || progress > previous.progress || (completed && !previous.completed))
+  ) {
+    bestGhosts[activeGhostKey] = {
+      mode: editorTesting ? "editor" : "practice",
+      progress,
+      completed: completed || !!(previous && previous.completed),
+      frames: ghostFrame,
+      groundY: ghostRunGroundY,
+      points: runGhostPoints.slice(),
+    };
+    persistGhosts();
+  }
+  runGhostPoints = [];
+}
+
+function getGhostPosition(ghost) {
+  const points = ghost.points;
+  if (ghostFrame > ghost.frames) return null;
+  let next = 1;
+  while (next < points.length && points[next][0] < ghostFrame) next++;
+  if (next >= points.length) {
+    const last = points[points.length - 1];
+    return ghostFrame === last[0] ? last : null;
+  }
+  const from = points[next - 1];
+  const to = points[next];
+  const fraction = Math.max(0, Math.min(1, (ghostFrame - from[0]) / (to[0] - from[0])));
+  return [
+    from[1] + (to[1] - from[1]) * fraction,
+    from[2] + (to[2] - from[2]) * fraction,
+    from[3] + (to[3] - from[3]) * fraction,
+    fraction < 0.5 ? from[4] : to[4],
+  ];
+}
+
 // -------------------- Start / Restart --------------------
 function startLevel(idx) {
   initAudio();
@@ -1449,6 +1607,7 @@ function startLevel(idx) {
   levelTimer = now();
   levelFinishTime = 0;
   resetPlayer(false);
+  beginGhostRun();
   gameState = "playing";
   startMusic();
   showAttemptFlash();
@@ -1456,12 +1615,16 @@ function startLevel(idx) {
 
 function restart() {
   if (practiceMode && checkpoints.length) {
+    finishGhostRun(false);
     resetPlayer(true);
+    beginGhostRun();
   } else {
+    finishGhostRun(false);
     attemptNum++;
     totalAttempts[currentLevelIdx] = attemptNum;
     save();
     resetPlayer(false);
+    beginGhostRun();
     startMusic();
   }
   gameState = "playing";
@@ -1475,6 +1638,7 @@ function showAttemptFlash() {
 
 function kill() {
   if (P.dead) return;
+  finishGhostRun(false);
   P.dead = true;
   deathNum++;
   shakeIntensity = 14;
@@ -1492,6 +1656,7 @@ function kill() {
 }
 
 function win() {
+  finishGhostRun(true);
   P.done = true;
   gameState = "complete";
   bestProg[currentLevelIdx] = 100;
@@ -1509,6 +1674,7 @@ function update() {
   if (gameState !== "playing" || P.dead || P.done) return;
   if (!levelData) return;
 
+  recordGhostFrame();
   inputJustDown = inputHeld && !_inputWasDown;
   _inputWasDown = inputHeld;
 
@@ -1613,12 +1779,10 @@ function update() {
         return;
       }
       P.y = groundY - PS;
-      if (P.vy > 0) {
-        if (!P.grounded) sfxLand();
-        P.grounded = true;
-      }
+      if (P.vy > 0 && !P.grounded) sfxLand();
+      P.grounded = true;
       P.vy = 0;
-    } else if (!onPlat && P.y + PS < groundY) {
+    } else if (!onPlat) {
       P.grounded = false;
     }
 
@@ -2202,7 +2366,54 @@ function drawObs() {
   }
 }
 
+function drawGhostReplay() {
+  if (!activeGhostKey) return;
+  const ghost = bestGhosts[activeGhostKey];
+  if (!ghost) return;
+  const yOffset = groundY - ghost.groundY;
+
+  ctx.save();
+  ctx.beginPath();
+  for (let i = 0; i < ghost.points.length; i++) {
+    const point = ghost.points[i];
+    const sx = point[1] + PS / 2 - cameraX;
+    const sy = point[2] + yOffset + PS / 2;
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  }
+  ctx.strokeStyle = "rgba(190, 130, 255, 0.58)";
+  ctx.lineWidth = 3;
+  ctx.shadowColor = "#b879ff";
+  ctx.shadowBlur = 12;
+  ctx.stroke();
+
+  const position = getGhostPosition(ghost);
+  if (position) {
+    ctx.translate(position[0] + PS / 2 - cameraX, position[1] + yOffset + PS / 2);
+    ctx.rotate(position[2]);
+    ctx.globalAlpha = 0.48;
+    ctx.fillStyle = "#b879ff";
+    ctx.strokeStyle = "#ead7ff";
+    ctx.lineWidth = 2;
+    if (position[3]) {
+      ctx.beginPath();
+      ctx.moveTo(PS / 2, 0);
+      ctx.lineTo(-PS / 2, -PS / 3);
+      ctx.lineTo(-PS / 3, 0);
+      ctx.lineTo(-PS / 2, PS / 3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(-PS / 2, -PS / 2, PS, PS);
+      ctx.strokeRect(-PS / 2, -PS / 2, PS, PS);
+    }
+  }
+  ctx.restore();
+}
+
 function drawPlayer() {
+  drawGhostReplay();
   if (P.dead) return;
   const dx = P.x - cameraX;
   const cx = dx + PS / 2,
@@ -3241,6 +3452,7 @@ window.advanceTime = (ms) => {
   const steps = Math.max(1, Math.round(ms / FRAME_MS));
   for (let i = 0; i < steps; i++) {
     simTime += FRAME_MS;
+    simulateFrame();
     frame();
   }
   useSimTime = false;
@@ -3438,6 +3650,7 @@ function openEditor() {
 }
 
 function returnToEditor() {
+  finishGhostRun(false);
   editorTesting = false;
   edPainting = false;
   gameState = "editor";
@@ -3460,6 +3673,7 @@ function playEditor() {
   levelTimer = now();
   levelFinishTime = 0;
   resetPlayer(false);
+  beginGhostRun();
   gameState = "playing";
   startMusic();
   showAttemptFlash();
@@ -3478,6 +3692,7 @@ function startSavedLevel(idx) {
   levelTimer = now();
   levelFinishTime = 0;
   resetPlayer(false);
+  beginGhostRun();
   gameState = "playing";
   startMusic();
   showAttemptFlash();
@@ -3495,7 +3710,10 @@ function saveEditor() {
     editorLevels[edSlot] = data;
   }
   const saved = persistEditorStore();
-  if (saved) queueCloudSave();
+  if (saved) {
+    clearGhostForLevel("c" + edSlot);
+    queueCloudSave();
+  }
   edMsg = saved ? "Saved" : "Save failed - storage unavailable";
   edMsgT = 70;
 }
@@ -3660,7 +3878,10 @@ function deleteEditorSlot(i) {
     edSlot = null;
     edName = "Untitled";
   } else if (edSlot != null && edSlot > i) edSlot--;
-  if (persistEditorStore()) queueCloudSave();
+  if (persistEditorStore()) {
+    shiftCustomGhostsAfterDelete(i);
+    queueCloudSave();
+  }
 }
 
 function editorBarH() {
@@ -3883,7 +4104,16 @@ function drawEditor() {
 }
 
 // -------------------- Main Loop --------------------
-let lastFrame = 0;
+let lastFrame = null;
+let frameAccumulator = 0;
+const MAX_FRAME_DELTA_MS = 100;
+const MAX_SIMULATION_STEPS = 5;
+
+function simulateFrame() {
+  if (gameState === "playing") update();
+  if (gameState !== "menu" && gameState !== "editor") updateParticles();
+  inputJustDown = false;
+}
 
 function frame() {
   // Decay screen shake
@@ -3902,8 +4132,6 @@ function frame() {
   } else if (gameState === "editor") {
     drawEditor();
   } else {
-    if (gameState === "playing") update();
-    updateParticles();
     ctx.save();
     ctx.translate(shakeX, shakeY);
     drawBG();
@@ -3916,16 +4144,31 @@ function frame() {
     if (gameState === "dead") drawDeath();
     if (gameState === "complete") drawWin();
   }
-
-  inputJustDown = false;
 }
 
 function loop(ts) {
   if (window.__freeze) {
+    lastFrame = null;
+    frameAccumulator = 0;
     requestAnimationFrame(loop);
     return;
   }
+
+  if (lastFrame === null) lastFrame = ts;
+  const elapsed = Math.min(Math.max(0, ts - lastFrame), MAX_FRAME_DELTA_MS);
   lastFrame = ts;
+  frameAccumulator += elapsed;
+
+  let steps = 0;
+  while (frameAccumulator >= FRAME_MS && steps < MAX_SIMULATION_STEPS) {
+    simulateFrame();
+    frameAccumulator -= FRAME_MS;
+    steps++;
+  }
+  if (steps === MAX_SIMULATION_STEPS && frameAccumulator >= FRAME_MS) {
+    frameAccumulator %= FRAME_MS;
+  }
+
   frame();
   requestAnimationFrame(loop);
 }

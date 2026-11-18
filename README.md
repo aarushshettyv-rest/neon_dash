@@ -35,7 +35,13 @@ Or simply open `index.html` directly in a browser.
 - Supabase account sign-in with email/password and cloud saves for progress, profile, and saved custom levels; Google sign-in is marked as coming soon
 - Newsletter signup for Neon Dash Updates via a Brevo-hosted, double-opt-in form
 - Attempt counter, death counter, and progress tracking
+- Fixed 60 Hz physics updates, independent of display refresh rate
+- Automatic local best-run ghost replays with a visible path line in practice mode and editor tests
 - Particle effects, screen shake, and player trail
+
+## Browser testing
+
+Copilot CLI starts the Playwright MCP server from the repository-level `.mcp.json` configuration. Node.js 18 or newer is required.
 
 ## Original content
 
