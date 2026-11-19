@@ -91,6 +91,10 @@ let activeGhostKey = null;
 let ghostFrame = 0;
 let runGhostPoints = [];
 let ghostRunGroundY = 0;
+const AUDIO_VOLUME_STEPS = [0, 0.25, 0.5, 0.75, 1];
+let ghostReplayVisible = true;
+let musicVolume = 0.75;
+let sfxVolume = 0.75;
 let supabaseClient = null;
 let authUser = null;
 let cloudSaveTimer = null;
@@ -114,6 +118,37 @@ let playerSkin = "cube";
 let playerColor = "#00E5FF";
 let settingsMessage = "";
 let settingsMessageT = 0;
+function normalizeVolume(value, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return AUDIO_VOLUME_STEPS.reduce(
+    (closest, step) =>
+      Math.abs(step - value) < Math.abs(closest - value) ? step : closest,
+    AUDIO_VOLUME_STEPS[0]
+  );
+}
+
+function saveGameSettings() {
+  applyAudioSettings();
+  try {
+    localStorage.setItem(
+      "gd_settings",
+      JSON.stringify({ ghostReplayVisible, musicVolume, sfxVolume })
+    );
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+try {
+  const settings = JSON.parse(localStorage.getItem("gd_settings") || "{}");
+  if (typeof settings.ghostReplayVisible === "boolean") {
+    ghostReplayVisible = settings.ghostReplayVisible;
+  }
+  musicVolume = normalizeVolume(settings.musicVolume, musicVolume);
+  sfxVolume = normalizeVolume(settings.sfxVolume, sfxVolume);
+} catch (e) {}
+
 try {
   const s = JSON.parse(localStorage.getItem("gd_save2") || "{}");
   bestProg = s.bp || {};
@@ -556,7 +591,7 @@ window.addEventListener("keydown", (e) => {
     if (gameState === "menu" && menuScreen !== "main") {
       if (menuScreen === "account") {
         menuScreen = "settings";
-        menuSel = 9;
+        menuSel = 12;
       } else {
         menuScreen = "main";
         menuSel = 0;
@@ -588,7 +623,7 @@ window.addEventListener("keydown", (e) => {
       : menuScreen === "levels"
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
-          ? 10
+          ? 13
           : 4;
     if (c === "ArrowDown") menuSel = Math.min(menuSel + 1, max);
     if (c === "ArrowUp") menuSel = Math.max(menuSel - 1, 0);
@@ -793,7 +828,16 @@ function goToMenu() {
 
 // -------------------- Audio --------------------
 let ac = null,
-  masterGain = null;
+  masterGain = null,
+  musicGain = null,
+  sfxGain = null;
+
+function applyAudioSettings() {
+  if (!ac) return;
+  const time = ac.currentTime;
+  if (musicGain) musicGain.gain.setTargetAtTime(musicVolume, time, 0.02);
+  if (sfxGain) sfxGain.gain.setTargetAtTime(sfxVolume, time, 0.02);
+}
 
 function initAudio() {
   if (ac) return;
@@ -802,6 +846,11 @@ function initAudio() {
     masterGain = ac.createGain();
     masterGain.gain.value = 0.25;
     masterGain.connect(ac.destination);
+    musicGain = ac.createGain();
+    sfxGain = ac.createGain();
+    musicGain.connect(masterGain);
+    sfxGain.connect(masterGain);
+    applyAudioSettings();
   } catch (e) {}
 }
 
@@ -816,7 +865,7 @@ function tone(freq, dur, type, vol, delay) {
     g.gain.setValueAtTime(vol || 0.08, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     o.connect(g);
-    g.connect(masterGain);
+    g.connect(sfxGain);
     o.start(t);
     o.stop(t + dur);
   } catch (e) {}
@@ -839,7 +888,7 @@ function noise(dur, vol, hpFreq) {
     f.frequency.value = hpFreq || 6000;
     n.connect(f);
     f.connect(g);
-    g.connect(masterGain);
+    g.connect(sfxGain);
     n.start();
     n.stop(ac.currentTime + dur + 0.01);
   } catch (e) {}
@@ -905,7 +954,7 @@ function envTone(freq, dur, type, vol, when, slideTo) {
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + Math.max(0.03, dur));
     o.connect(g);
-    g.connect(masterGain);
+    g.connect(musicGain);
     o.start(t);
     o.stop(t + dur + 0.02);
   } catch (e) {}
@@ -929,7 +978,7 @@ function noiseAt(dur, vol, hpFreq, when) {
     f.frequency.value = hpFreq || 6000;
     n.connect(f);
     f.connect(g);
-    g.connect(masterGain);
+    g.connect(musicGain);
     n.start(t);
     n.stop(t + dur + 0.02);
   } catch (e) {}
@@ -1347,16 +1396,38 @@ function onViewport() {
   resize();
   const dy = groundY - oldG;
   levels = makeLevels();
+  const previousLevel = levelData;
   if (gameState === "editor" || editorTesting) {
-    levelData = compileEditor(edObjs, edName);
+    const nextLevel = compileEditor(edObjs, edName);
+    preserveHitObstacles(previousLevel, nextLevel);
+    levelData = nextLevel;
   } else if (levelData && typeof currentLevelIdx === "number" && levels[currentLevelIdx]) {
-    levelData = levels[currentLevelIdx];
+    const nextLevel = levels[currentLevelIdx];
+    preserveHitObstacles(previousLevel, nextLevel);
+    levelData = nextLevel;
   }
   if (dy && gameState !== "menu" && gameState !== "editor") {
     P.y += dy;
     for (const cp of checkpoints) cp.y += dy;
     ghostRunGroundY += dy;
     for (const point of runGhostPoints) point[2] += dy;
+  }
+}
+
+function preserveHitObstacles(previousLevel, nextLevel) {
+  if (!previousLevel || !nextLevel) return;
+  const hitCounts = new Map();
+  for (const obstacle of previousLevel.obs) {
+    if (!obstacle._hit) continue;
+    const key = `${obstacle.type}|${obstacle.x}|${obstacle.id ?? ""}`;
+    hitCounts.set(key, (hitCounts.get(key) || 0) + 1);
+  }
+  for (const obstacle of nextLevel.obs) {
+    const key = `${obstacle.type}|${obstacle.x}|${obstacle.id ?? ""}`;
+    const count = hitCounts.get(key) || 0;
+    if (!count) continue;
+    obstacle._hit = true;
+    hitCounts.set(key, count - 1);
   }
 }
 
@@ -1428,6 +1499,29 @@ function isGround(wx) {
 
 function checkpointSafe() {
   if (!levelData) return false;
+  const clearance = Math.max(PS * 2, P.speed * 12);
+  for (const o of levelData.obs) {
+    let left;
+    let right;
+    if (o.type === "gap") {
+      left = o.x;
+      right = o.x + o.w;
+    } else if (o.type === "spike" || o.type === "spikeD") {
+      left = o.x;
+      right = o.x + SPIKE_W;
+    } else if (o.type === "saw") {
+      const radius = o.r || 18;
+      left = o.x - radius;
+      right = o.x + radius;
+    } else if (o.type === "block" || o.type === "plat") {
+      if (P.y + PS <= o.y || P.y >= o.y + o.h) continue;
+      left = o.x;
+      right = o.x + o.w;
+    } else {
+      continue;
+    }
+    if (P.x + PS + clearance > left && P.x - clearance < right) return false;
+  }
   if (!P.isShip) return P.grounded;
   let ceil = CEIL_Y;
   let floor = groundY;
@@ -1651,7 +1745,7 @@ function kill() {
     save();
   }
   setTimeout(() => {
-    if (gameState === "playing" || P.dead) gameState = "dead";
+    if (gameState === "playing" && P.dead) gameState = "dead";
   }, 450);
 }
 
@@ -2367,7 +2461,7 @@ function drawObs() {
 }
 
 function drawGhostReplay() {
-  if (!activeGhostKey) return;
+  if (!ghostReplayVisible || !activeGhostKey) return;
   const ghost = bestGhosts[activeGhostKey];
   if (!ghost) return;
   const yOffset = groundY - ghost.groundY;
@@ -3104,7 +3198,7 @@ function drawMenu() {
 function drawSettingsMenu() {
   const compact = H < 400;
   const rowHeight = compact ? 34 : 48;
-  const actionHeight = compact ? 34 : 42;
+  const actionHeight = Math.min(compact ? 34 : 42, Math.max(28, H * 0.085));
   ctx.save();
   ctx.shadowColor = "#aa88ff";
   ctx.shadowBlur = 18;
@@ -3196,14 +3290,43 @@ function drawSettingsMenu() {
     menuBtns.push({ x, y: swatchY, w: swatchSize, h: swatchSize, act: i + 2 });
   });
 
+  const controlY = H * 0.68;
+  const controlGap = 6;
+  const controlWidth = (bw - controlGap * 2) / 3;
+  const controls = [
+    { id: 8, label: "Ghost: " + (ghostReplayVisible ? "ON" : "OFF"), color: "#44ddff" },
+    { id: 9, label: "Music: " + Math.round(musicVolume * 100) + "%", color: "#aa88ff" },
+    { id: 10, label: "SFX: " + Math.round(sfxVolume * 100) + "%", color: "#ffd43b" },
+  ];
+  controls.forEach((control, index) => {
+    const x = bx + index * (controlWidth + controlGap);
+    const selected = menuSel === control.id;
+    ctx.fillStyle = selected ? colorAlpha(control.color, 0.24) : "rgba(255,255,255,0.04)";
+    ctx.strokeStyle = control.color;
+    ctx.lineWidth = selected ? 2 : 1;
+    rRect(x, controlY, controlWidth, actionHeight, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = `bold ${compact || W < 420 ? 10 : 12}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(
+      control.label,
+      x + controlWidth / 2,
+      controlY + actionHeight * 0.64,
+      controlWidth - 6
+    );
+    menuBtns.push({ x, y: controlY, w: controlWidth, h: actionHeight, act: control.id });
+  });
+
   const actionWidth = Math.min(190, (bw - 10) / 2);
-  const actionY = H * 0.68;
+  const actionY = Math.max(H * 0.77, controlY + actionHeight + 4);
   const custom = {
     x: W / 2 - actionWidth - 5,
     y: actionY,
     w: actionWidth,
     h: actionHeight,
-    act: 8,
+    act: 11,
   };
   ctx.fillStyle = menuSel === custom.act ? "rgba(170,136,255,0.22)" : "rgba(255,255,255,0.04)";
   ctx.strokeStyle = "#aa88ff";
@@ -3221,7 +3344,7 @@ function drawSettingsMenu() {
     y: actionY,
     w: actionWidth,
     h: actionHeight,
-    act: 9,
+    act: 12,
   };
   ctx.fillStyle = menuSel === account.act ? "rgba(255,212,59,0.24)" : "rgba(255,255,255,0.04)";
   ctx.strokeStyle = "#ffd43b";
@@ -3234,7 +3357,8 @@ function drawSettingsMenu() {
   ctx.fillText("Account", W / 2 + actionWidth / 2 + 5, account.y + account.h * 0.65);
   menuBtns.push(account);
 
-  const back = { x: W / 2 - 100, y: H * 0.88, w: 200, h: actionHeight, act: 10 };
+  const backY = Math.max(H * 0.89, actionY + actionHeight + 8);
+  const back = { x: W / 2 - 100, y: backY, w: 200, h: actionHeight, act: 13 };
   ctx.fillStyle = menuSel === back.act ? "#aa88ff" : "rgba(255,255,255,0.04)";
   ctx.strokeStyle = "#aa88ff";
   ctx.lineWidth = menuSel === back.act ? 2 : 1;
@@ -3249,9 +3373,11 @@ function drawSettingsMenu() {
 
   if (settingsMessageT > 0) {
     settingsMessageT--;
-    ctx.fillStyle = settingsMessage.includes("couldn't") ? "#ff8c8c" : "#78ffb4";
-    ctx.font = '13px "Segoe UI", system-ui, sans-serif';
-    ctx.fillText(settingsMessage, W / 2, H * 0.84);
+    if (H >= 560) {
+      ctx.fillStyle = settingsMessage.includes("couldn't") ? "#ff8c8c" : "#78ffb4";
+      ctx.font = '13px "Segoe UI", system-ui, sans-serif';
+      ctx.fillText(settingsMessage, W / 2, H * 0.87);
+    }
   }
   ctx.restore();
 }
@@ -3328,6 +3454,26 @@ function menuAction() {
     } else if (menuSel >= 2 && menuSel < 2 + PLAYER_COLORS.length) {
       changePlayerColor(PLAYER_COLORS[menuSel - 2].value);
     } else if (menuSel === 8) {
+      ghostReplayVisible = !ghostReplayVisible;
+      showSettingsMessage(
+        "Ghost replay " + (ghostReplayVisible ? "shown" : "hidden"),
+        saveGameSettings()
+      );
+    } else if (menuSel === 9) {
+      const current = AUDIO_VOLUME_STEPS.indexOf(musicVolume);
+      musicVolume = AUDIO_VOLUME_STEPS[(current + 1) % AUDIO_VOLUME_STEPS.length];
+      showSettingsMessage(
+        "Music volume: " + Math.round(musicVolume * 100) + "%",
+        saveGameSettings()
+      );
+    } else if (menuSel === 10) {
+      const current = AUDIO_VOLUME_STEPS.indexOf(sfxVolume);
+      sfxVolume = AUDIO_VOLUME_STEPS[(current + 1) % AUDIO_VOLUME_STEPS.length];
+      showSettingsMessage(
+        "SFX volume: " + Math.round(sfxVolume * 100) + "%",
+        saveGameSettings()
+      );
+    } else if (menuSel === 11) {
       const color = window.prompt("Enter a hex color (#RRGGBB):", playerColor);
       if (color !== null) {
         const trimmedColor = color.trim();
@@ -3337,10 +3483,10 @@ function menuAction() {
           showSettingsMessage("Use a hex color like #12ABEF", true);
         }
       }
-    } else if (menuSel === 9) {
+    } else if (menuSel === 12) {
       menuScreen = "account";
       menuSel = 0;
-    } else if (menuSel === 10) {
+    } else if (menuSel === 13) {
       menuScreen = "main";
       menuSel = 0;
     }
@@ -3351,7 +3497,7 @@ function menuAction() {
     else if (menuSel === 3) signOutFromAccount();
     else if (menuSel === 4) {
       menuScreen = "settings";
-      menuSel = 9;
+      menuSel = 12;
     }
   } else {
     const count = levels.length + editorLevels.length;

@@ -31,13 +31,14 @@ Or simply open `index.html` directly in a browser.
 - Multiple speed zones (slow / normal / fast / very fast)
 - Practice mode with checkpoints
 - Level editor with save/load, undo, play-testing, and `.ndcl` custom-level import/export; saved custom levels are available from **Play**
-- Player settings for username, icon shape, and preset or custom color
+- Player settings for username, icon shape, preset or custom color, ghost visibility, and separate music/SFX volume adjustable in 25% steps
 - Supabase account sign-in with email/password and cloud saves for progress, profile, and saved custom levels; Google sign-in is marked as coming soon
-- Newsletter signup for Neon Dash Updates via a Brevo-hosted, double-opt-in form
+- Newsletter signup for Neon Dash Updates.
 - Attempt counter, death counter, and progress tracking
 - Fixed 60 Hz physics updates, independent of display refresh rate
 - Automatic local best-run ghost replays with a visible path line in practice mode and editor tests
 - Particle effects, screen shake, and player trail
+
 
 ## Original content
 
