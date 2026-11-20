@@ -17,6 +17,7 @@ Or simply open `index.html` directly in a browser.
 - **Space / Up Arrow / Click or Tap** — jump / fly
 - **P / On-screen pause button** — pause
 - **R** — retry
+- In Practice mode, press **C** while paused to set a checkpoint where you are, or choose **Set Checkpoint & Retry** after a death. Press **R** to restart from the latest checkpoint.
 - **M** — mute
 - **Esc** — back to menu
 - In the level editor: **Click or Tap** to place, use the **Erase** tool (or right-click) to erase, **A/D** or the mouse wheel to pan, and **two-finger drag** to pan on touch screens. Use **Ctrl+Z** to undo and **Enter** to test.

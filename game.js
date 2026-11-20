@@ -65,6 +65,9 @@ let cameraX = 0;
 let particles = [];
 let checkpoints = [];
 let lastCpX = 0;
+let recentPlayerStates = [];
+let deathCheckpointCandidate = null;
+let coyoteFrames = 0;
 
 // Attempt flash
 let attemptFlashAlpha = 0;
@@ -529,6 +532,23 @@ function resetPlayer(fromCp) {
       if (!cp || o.x >= P.x - 30) o._hit = false;
     }
   }
+  recentPlayerStates = [];
+  deathCheckpointCandidate = null;
+  coyoteFrames = 0;
+}
+
+function playerCheckpointSnapshot(x, y, isShip, speed, grounded) {
+  return { x, y, isShip, speed, grounded };
+}
+
+function addCustomCheckpoint(snapshot) {
+  if (!practiceMode || editorTesting || !snapshot) return false;
+  checkpoints = checkpoints.filter((checkpoint) => !checkpoint.custom);
+  const checkpoint = { ...snapshot, custom: true };
+  checkpoints.push(checkpoint);
+  lastCpX = Math.max(lastCpX, checkpoint.x);
+  emitP(checkpoint.x + PS / 2, checkpoint.y + PS / 2, "#00ff88", 12, 4);
+  return true;
 }
 
 // -------------------- Input --------------------
@@ -602,12 +622,25 @@ window.addEventListener("keydown", (e) => {
       returnToEditor();
       return;
     }
-    if (gameState === "playing" || gameState === "paused") {
+    if (gameState === "playing" || gameState === "paused" || gameState === "dead") {
       goToMenu();
       return;
     }
   }
-  if (c === "KeyR" && (gameState === "playing" || gameState === "dead")) {
+  if (
+    c === "KeyC" &&
+    practiceMode &&
+    !editorTesting &&
+    (gameState === "paused" || gameState === "dead")
+  ) {
+    const snapshot =
+      gameState === "paused"
+        ? playerCheckpointSnapshot(P.x, P.y, P.isShip, P.speed, P.grounded)
+        : deathCheckpointCandidate;
+    if (addCustomCheckpoint(snapshot) && gameState === "dead") restart();
+    return;
+  }
+  if (c === "KeyR" && (gameState === "playing" || gameState === "paused" || gameState === "dead")) {
     restart();
     return;
   }
@@ -653,6 +686,17 @@ function tapHandler(x, y) {
     return;
   }
   if (gameState === "dead") {
+    const button = deathCheckpointButton();
+    if (
+      practiceMode &&
+      !editorTesting &&
+      x >= button.x &&
+      x <= button.x + button.w &&
+      y >= button.y &&
+      y <= button.y + button.h
+    ) {
+      addCustomCheckpoint(deathCheckpointCandidate);
+    }
     restart();
     return;
   }
@@ -662,6 +706,20 @@ function tapHandler(x, y) {
     return;
   }
   if (gameState === "paused") {
+    const button = pauseCheckpointButton();
+    if (
+      practiceMode &&
+      !editorTesting &&
+      x >= button.x &&
+      x <= button.x + button.w &&
+      y >= button.y &&
+      y <= button.y + button.h
+    ) {
+      addCustomCheckpoint(
+        playerCheckpointSnapshot(P.x, P.y, P.isShip, P.speed, P.grounded)
+      );
+      return;
+    }
     // Check if tapped on "Back to Menu" button area
     if (y > H / 2 + 30 && y < H / 2 + 70) {
       if (editorTesting) returnToEditor();
@@ -1409,6 +1467,8 @@ function onViewport() {
   if (dy && gameState !== "menu" && gameState !== "editor") {
     P.y += dy;
     for (const cp of checkpoints) cp.y += dy;
+    for (const state of recentPlayerStates) state.y += dy;
+    if (deathCheckpointCandidate) deathCheckpointCandidate.y += dy;
     ghostRunGroundY += dy;
     for (const point of runGhostPoints) point[2] += dy;
   }
@@ -1732,6 +1792,11 @@ function showAttemptFlash() {
 
 function kill() {
   if (P.dead) return;
+  deathCheckpointCandidate = null;
+  if (practiceMode && !editorTesting && recentPlayerStates.length) {
+    const candidateIndex = Math.max(0, recentPlayerStates.length - 18);
+    deathCheckpointCandidate = { ...recentPlayerStates[candidateIndex] };
+  }
   finishGhostRun(false);
   P.dead = true;
   deathNum++;
@@ -1767,6 +1832,11 @@ function win() {
 function update() {
   if (gameState !== "playing" || P.dead || P.done) return;
   if (!levelData) return;
+
+  recentPlayerStates.push(
+    playerCheckpointSnapshot(P.x, P.y, P.isShip, P.speed, P.grounded)
+  );
+  if (recentPlayerStates.length > 36) recentPlayerStates.shift();
 
   recordGhostFrame();
   inputJustDown = inputHeld && !_inputWasDown;
@@ -1824,7 +1894,7 @@ function update() {
         return;
       }
     }
-    if (P.y > H + 150) {
+    if (P.y > groundY + PS || P.y > H + 150) {
       kill();
       return;
     }
@@ -1875,8 +1945,10 @@ function update() {
       P.y = groundY - PS;
       if (P.vy > 0 && !P.grounded) sfxLand();
       P.grounded = true;
+      coyoteFrames = 4;
       P.vy = 0;
     } else if (!onPlat) {
+      if (P.grounded) coyoteFrames = 4;
       P.grounded = false;
     }
 
@@ -1887,11 +1959,17 @@ function update() {
     }
 
     // Jump
-    if (inputJustDown && P.grounded) {
+    if (inputJustDown && (P.grounded || coyoteFrames > 0)) {
+      if (!P.grounded && Math.abs(P.y - (groundY - PS)) <= 10) {
+        P.y = groundY - PS;
+      }
       P.vy = JUMP_VEL;
       P.grounded = false;
+      coyoteFrames = 0;
       P.tgtRot += Math.PI / 2;
       sfxJump();
+    } else if (coyoteFrames > 0) {
+      coyoteFrames--;
     }
 
     // Rotation
@@ -1932,6 +2010,7 @@ function update() {
         ) {
           P.vy = PAD_JUMP;
           P.grounded = false;
+          coyoteFrames = 0;
           P.tgtRot += Math.PI;
           sfxPad();
           o._hit = true;
@@ -1945,6 +2024,7 @@ function update() {
         ) {
           P.vy = ORB_JUMP;
           P.grounded = false;
+          coyoteFrames = 0;
           P.tgtRot += Math.PI / 2;
           sfxOrb();
           o._hit = true;
@@ -1960,6 +2040,7 @@ function update() {
           if (!P.isShip) {
             P.isShip = true;
             P.vy = -1.5;
+            coyoteFrames = 0;
           }
         }
         break;
@@ -1968,6 +2049,7 @@ function update() {
           if (P.isShip) {
             P.isShip = false;
             P.grounded = false;
+            coyoteFrames = 0;
             P.vy = Math.min(P.vy, 2);
           }
         }
@@ -2648,6 +2730,16 @@ function drawPlayer() {
   }
 }
 
+function pauseCheckpointButton() {
+  const w = Math.min(250, W * 0.78);
+  return { x: (W - w) / 2, y: H / 2 + 76, w, h: 36 };
+}
+
+function deathCheckpointButton() {
+  const w = Math.min(270, W * 0.82);
+  return { x: (W - w) / 2, y: Math.min(H / 2 + 112, H - 54), w, h: 34 };
+}
+
 function drawHUD() {
   if (gameState !== "playing" && gameState !== "paused") return;
   const prog = getProgress();
@@ -2774,6 +2866,18 @@ function drawHUD() {
     ctx.fillStyle = "rgba(255,100,100,0.85)";
     ctx.font = 'bold 18px "Segoe UI", system-ui, sans-serif';
     ctx.fillText(editorTesting ? "Esc \u2014 Back to Editor" : "Esc \u2014 Back to Menu", W / 2, H / 2 + 55);
+    if (practiceMode && !editorTesting) {
+      const button = pauseCheckpointButton();
+      ctx.fillStyle = "rgba(0,255,136,0.12)";
+      ctx.strokeStyle = "#00ff88";
+      ctx.lineWidth = 1.5;
+      rRect(button.x, button.y, button.w, button.h, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#baffd9";
+      ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+      ctx.fillText("Set Checkpoint Here (C)", W / 2, button.y + 23);
+    }
   }
 }
 
@@ -2827,9 +2931,26 @@ function drawDeath() {
   ctx.font = "bold 14px \"Segoe UI\", system-ui, sans-serif";
   ctx.fillText("\u25C6 " + runCoins() + "/3", W / 2, H / 2 + 94);
 
+  if (practiceMode && !editorTesting) {
+    const button = deathCheckpointButton();
+    ctx.fillStyle = "rgba(0,255,136,0.12)";
+    ctx.strokeStyle = "#00ff88";
+    ctx.lineWidth = 1.5;
+    rRect(button.x, button.y, button.w, button.h, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#baffd9";
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    ctx.fillText("Set Checkpoint & Retry (C)", W / 2, button.y + 22);
+  }
+
   ctx.fillStyle = "rgba(255,255,255,0.35)";
   ctx.font = '14px "Segoe UI", system-ui, sans-serif';
-  ctx.fillText(editorTesting ? "Esc to return to the editor" : "Esc to go back to menu", W / 2, H / 2 + 118);
+  ctx.fillText(
+    editorTesting ? "Esc to return to the editor" : "Esc to go back to menu",
+    W / 2,
+    practiceMode && !editorTesting ? Math.min(H / 2 + 158, H - 12) : H / 2 + 118
+  );
 }
 
 function drawWin() {
