@@ -29,6 +29,7 @@ const BASE_SPEED = 6.2;
 const SPEEDS = { slow: 4.2, normal: 6.2, fast: 9, veryfast: 11.5 };
 const PAD_JUMP = -17.5;
 const ORB_JUMP = -14;
+const POWER_PORTAL_FRAMES = 720; // 12s at 60 Hz
 const SPIKE_W = 36;
 const SPIKE_H = 30;
 const COL_SHRINK = 8; // collision forgiveness pixels
@@ -430,6 +431,22 @@ async function submitEmailAuth(event) {
   );
 }
 
+async function signInWithDiscord() {
+  if (!supabaseClient) {
+    showAccountMessage("Configure Supabase in supabase-config.js first");
+    return;
+  }
+  try {
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: "discord",
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) showAccountMessage(`Discord sign-in failed: ${error.message}`);
+  } catch (error) {
+    showAccountMessage(`Discord sign-in failed: ${error.message}`);
+  }
+}
+
 async function signOutFromAccount() {
   if (!supabaseClient || !authUser) {
     showAccountMessage(authUser ? "Supabase is unavailable" : "You are not signed in");
@@ -497,6 +514,8 @@ const P = {
   sizeScale: 1,
   gravityScale: 1,
   extraJumps: 0,
+  sizeFrames: 0,
+  gravityFrames: 0,
   slowTimeFrames: 0,
   momentumFrames: 0,
   momentumBaseSpeed: BASE_SPEED,
@@ -522,16 +541,24 @@ function activatePowerPortal(portal, size) {
     portal._hit ||
     !rr(P.x, P.y, size, size, portal.x - 18, CEIL_Y, 36, groundY - CEIL_Y)
   ) return;
-  if (portal.type === "sizeSmallP") setPlayerSize(0.65);
-  else if (portal.type === "sizeBigP") setPlayerSize(1.3);
-  else if (portal.type === "bounceP") {
+  if (portal.type === "sizeSmallP") {
+    setPlayerSize(0.65);
+    P.sizeFrames = POWER_PORTAL_FRAMES;
+  } else if (portal.type === "sizeBigP") {
+    setPlayerSize(1.3);
+    P.sizeFrames = POWER_PORTAL_FRAMES;
+  } else if (portal.type === "bounceP") {
     P.vy = P.isShip ? -6.6 : -17.5;
     P.grounded = false;
     coyoteFrames = 0;
     P.extraJumps = 0;
-  } else if (portal.type === "lowGravP") P.gravityScale = 0.55;
-  else if (portal.type === "highGravP") P.gravityScale = 1.65;
-  else if (portal.type === "doubleJumpP") P.extraJumps = 1;
+  } else if (portal.type === "lowGravP") {
+    P.gravityScale = 0.55;
+    P.gravityFrames = POWER_PORTAL_FRAMES;
+  } else if (portal.type === "highGravP") {
+    P.gravityScale = 1.65;
+    P.gravityFrames = POWER_PORTAL_FRAMES;
+  } else if (portal.type === "doubleJumpP") P.extraJumps = 1;
   else if (portal.type === "slowTimeP") P.slowTimeFrames = 180;
   else if (portal.type === "momentumP") {
     P.momentumFrames = 240;
@@ -544,6 +571,14 @@ function activatePowerPortal(portal, size) {
 function advancePortalEffects() {
   const timeScale = P.slowTimeFrames > 0 ? 0.55 : 1;
   if (P.slowTimeFrames > 0) P.slowTimeFrames--;
+  if (P.sizeFrames > 0) {
+    P.sizeFrames--;
+    if (P.sizeFrames === 0) setPlayerSize(1);
+  }
+  if (P.gravityFrames > 0) {
+    P.gravityFrames--;
+    if (P.gravityFrames === 0) P.gravityScale = 1;
+  }
   if (P.momentumFrames > 0) {
     const accelerate =
       momentumControl === "accelerate" ||
@@ -576,6 +611,8 @@ function resetPlayer(fromCp) {
     P.sizeScale = cp.sizeScale || 1;
     P.gravityScale = cp.gravityScale || 1;
     P.extraJumps = cp.extraJumps || 0;
+    P.sizeFrames = cp.sizeFrames || 0;
+    P.gravityFrames = cp.gravityFrames || 0;
     P.slowTimeFrames = cp.slowTimeFrames || 0;
     P.momentumFrames = cp.momentumFrames || 0;
     P.momentumBaseSpeed = cp.momentumBaseSpeed || P.speed;
@@ -588,6 +625,8 @@ function resetPlayer(fromCp) {
     P.sizeScale = 1;
     P.gravityScale = 1;
     P.extraJumps = 0;
+    P.sizeFrames = 0;
+    P.gravityFrames = 0;
     P.slowTimeFrames = 0;
     P.momentumFrames = 0;
     P.momentumBaseSpeed = BASE_SPEED;
@@ -623,6 +662,8 @@ function playerCheckpointSnapshot(x, y, isShip, speed, grounded) {
     sizeScale: P.sizeScale,
     gravityScale: P.gravityScale,
     extraJumps: P.extraJumps,
+    sizeFrames: P.sizeFrames,
+    gravityFrames: P.gravityFrames,
     slowTimeFrames: P.slowTimeFrames,
     momentumFrames: P.momentumFrames,
     momentumBaseSpeed: P.momentumBaseSpeed,
@@ -760,7 +801,7 @@ window.addEventListener("keydown", (e) => {
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
           ? 13
-          : 4;
+          : 5;
     if (c === "ArrowDown") menuSel = Math.min(menuSel + 1, max);
     if (c === "ArrowUp") menuSel = Math.max(menuSel - 1, 0);
     if (menuScreen === "levels" && (c === "ArrowDown" || c === "ArrowUp")) {
@@ -2007,6 +2048,8 @@ function update() {
       sizeScale: P.sizeScale,
       gravityScale: P.gravityScale,
       extraJumps: P.extraJumps,
+      sizeFrames: P.sizeFrames,
+      gravityFrames: P.gravityFrames,
       slowTimeFrames: P.slowTimeFrames,
       momentumFrames: P.momentumFrames,
       momentumBaseSpeed: P.momentumBaseSpeed,
@@ -3061,6 +3104,28 @@ function drawHUD() {
     ctx.textAlign = "center";
     ctx.fillText("SLOW TIME  " + (P.slowTimeFrames / 60).toFixed(1) + "s", W / 2, 112);
   }
+  if (P.gravityFrames > 0) {
+    const low = P.gravityScale < 1;
+    ctx.fillStyle = low ? "#66ffbb" : "#ff6655";
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText(
+      (low ? "LOW GRAVITY  " : "HIGH GRAVITY  ") + (P.gravityFrames / 60).toFixed(1) + "s",
+      W / 2,
+      130
+    );
+  }
+  if (P.sizeFrames > 0) {
+    const small = P.sizeScale < 1;
+    ctx.fillStyle = small ? "#44ddff" : "#ff66dd";
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText(
+      (small ? "SMALL  " : "BIG  ") + (P.sizeFrames / 60).toFixed(1) + "s",
+      W / 2,
+      148
+    );
+  }
   if (P.momentumFrames > 0 && gameState === "playing") {
     const buttons = momentumControlButtons();
     for (const [action, label] of [["brake", "BRAKE"], ["accelerate", "BOOST"]]) {
@@ -3771,6 +3836,7 @@ function drawAccountMenu() {
     { label: "Email sign up", color: "#44ddff" },
     { label: "Email sign in", color: "#44ddff" },
     { label: "Continue with Google", color: "#777777", comingSoon: true },
+    { label: "Continue with Discord", color: "#5865F2" },
     { label: "Sign out", color: "#ff6b6b" },
     { label: "\u2190  Back", color: "#aa88ff" },
   ];
@@ -3785,7 +3851,8 @@ function drawAccountMenu() {
   ctx.fillText("Account", W / 2, H * 0.1);
   ctx.restore();
 
-  const identity = authUser ? `Signed in: ${authUser.email || "account"}` : "Not signed in";
+  const identityEmail = authUser && (authUser.email || (authUser.user_metadata && authUser.user_metadata.full_name));
+  const identity = authUser ? `Signed in: ${identityEmail || "account"}` : "Not signed in";
   ctx.fillStyle = "rgba(255,255,255,0.82)";
   ctx.font = `${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
   ctx.textAlign = "center";
@@ -3873,8 +3940,9 @@ function menuAction() {
     if (menuSel === 0) openEmailAuth("signup");
     else if (menuSel === 1) openEmailAuth("signin");
     else if (menuSel === 2) window.alert("Google sign-in is coming soon!");
-    else if (menuSel === 3) signOutFromAccount();
-    else if (menuSel === 4) {
+    else if (menuSel === 3) signInWithDiscord();
+    else if (menuSel === 4) signOutFromAccount();
+    else if (menuSel === 5) {
       menuScreen = "settings";
       menuSel = 12;
     }
@@ -3963,6 +4031,8 @@ function renderGameToText() {
       size: Math.round(playerSize() * 100) / 100,
       gravityScale: P.gravityScale,
       extraJumps: P.extraJumps,
+      sizeFrames: P.sizeFrames,
+      gravityFrames: P.gravityFrames,
       slowTimeFrames: P.slowTimeFrames,
       momentumFrames: P.momentumFrames,
     },
