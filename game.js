@@ -494,9 +494,73 @@ const P = {
   grounded: false,
   isShip: false,
   speed: BASE_SPEED,
+  sizeScale: 1,
+  gravityScale: 1,
+  extraJumps: 0,
+  slowTimeFrames: 0,
+  momentumFrames: 0,
+  momentumBaseSpeed: BASE_SPEED,
   dead: false,
   done: false,
 };
+
+function playerSize() {
+  return PS * (P.sizeScale || 1);
+}
+
+function setPlayerSize(scale) {
+  const oldSize = playerSize();
+  P.sizeScale = scale;
+  const nextSize = playerSize();
+  const offset = (oldSize - nextSize) / 2;
+  P.x += offset;
+  P.y += offset;
+}
+
+function activatePowerPortal(portal, size) {
+  if (
+    portal._hit ||
+    !rr(P.x, P.y, size, size, portal.x - 18, CEIL_Y, 36, groundY - CEIL_Y)
+  ) return;
+  if (portal.type === "sizeSmallP") setPlayerSize(0.65);
+  else if (portal.type === "sizeBigP") setPlayerSize(1.3);
+  else if (portal.type === "bounceP") {
+    P.vy = P.isShip ? -6.6 : -17.5;
+    P.grounded = false;
+    coyoteFrames = 0;
+    P.extraJumps = 0;
+  } else if (portal.type === "lowGravP") P.gravityScale = 0.55;
+  else if (portal.type === "highGravP") P.gravityScale = 1.65;
+  else if (portal.type === "doubleJumpP") P.extraJumps = 1;
+  else if (portal.type === "slowTimeP") P.slowTimeFrames = 180;
+  else if (portal.type === "momentumP") {
+    P.momentumFrames = 240;
+    P.momentumBaseSpeed = P.speed;
+  }
+  else return;
+  portal._hit = true;
+}
+
+function advancePortalEffects() {
+  const timeScale = P.slowTimeFrames > 0 ? 0.55 : 1;
+  if (P.slowTimeFrames > 0) P.slowTimeFrames--;
+  if (P.momentumFrames > 0) {
+    const accelerate =
+      momentumControl === "accelerate" ||
+      heldKeys.ArrowRight ||
+      heldKeys.KeyD;
+    const brake =
+      momentumControl === "brake" ||
+      heldKeys.ArrowLeft ||
+      heldKeys.KeyA;
+    if (accelerate && !brake) P.speed = Math.min(SPEEDS.veryfast, P.speed + 0.06);
+    else if (brake && !accelerate) P.speed = Math.max(SPEEDS.slow, P.speed - 0.08);
+    else P.speed += (P.momentumBaseSpeed - P.speed) * 0.035;
+    P.momentumFrames--;
+    if (P.momentumFrames === 0) P.speed = P.momentumBaseSpeed;
+  }
+  return timeScale;
+}
 
 function resetPlayer(fromCp) {
   const cp =
@@ -509,12 +573,24 @@ function resetPlayer(fromCp) {
     P.isShip = cp.isShip;
     P.speed = cp.speed;
     P.grounded = cp.grounded;
+    P.sizeScale = cp.sizeScale || 1;
+    P.gravityScale = cp.gravityScale || 1;
+    P.extraJumps = cp.extraJumps || 0;
+    P.slowTimeFrames = cp.slowTimeFrames || 0;
+    P.momentumFrames = cp.momentumFrames || 0;
+    P.momentumBaseSpeed = cp.momentumBaseSpeed || P.speed;
   } else {
     P.x = 250;
     P.y = groundY - PS;
     P.isShip = false;
     P.speed = BASE_SPEED;
     P.grounded = true;
+    P.sizeScale = 1;
+    P.gravityScale = 1;
+    P.extraJumps = 0;
+    P.slowTimeFrames = 0;
+    P.momentumFrames = 0;
+    P.momentumBaseSpeed = BASE_SPEED;
     checkpoints = [];
     lastCpX = 0;
   }
@@ -538,7 +614,19 @@ function resetPlayer(fromCp) {
 }
 
 function playerCheckpointSnapshot(x, y, isShip, speed, grounded) {
-  return { x, y, isShip, speed, grounded };
+  return {
+    x,
+    y,
+    isShip,
+    speed,
+    grounded,
+    sizeScale: P.sizeScale,
+    gravityScale: P.gravityScale,
+    extraJumps: P.extraJumps,
+    slowTimeFrames: P.slowTimeFrames,
+    momentumFrames: P.momentumFrames,
+    momentumBaseSpeed: P.momentumBaseSpeed,
+  };
 }
 
 function addCustomCheckpoint(snapshot) {
@@ -547,7 +635,8 @@ function addCustomCheckpoint(snapshot) {
   const checkpoint = { ...snapshot, custom: true };
   checkpoints.push(checkpoint);
   lastCpX = Math.max(lastCpX, checkpoint.x);
-  emitP(checkpoint.x + PS / 2, checkpoint.y + PS / 2, "#00ff88", 12, 4);
+  const cpSize = PS * (checkpoint.sizeScale || 1);
+  emitP(checkpoint.x + cpSize / 2, checkpoint.y + cpSize / 2, "#00ff88", 12, 4);
   return true;
 }
 
@@ -555,6 +644,8 @@ function addCustomCheckpoint(snapshot) {
 let inputHeld = false;
 let inputJustDown = false;
 let _inputWasDown = false;
+let momentumControl = null;
+let momentumControlTouch = null;
 let touchMenuStart = null;
 let editorTouchPan = null;
 
@@ -565,11 +656,18 @@ function iDown(e) {
 function iUp(e) {
   if (e) e.preventDefault();
   inputHeld = false;
+  momentumControl = null;
+  momentumControlTouch = null;
 }
 
 const heldKeys = {};
 window.addEventListener("keydown", (e) => {
   heldKeys[e.code] = true;
+  if (
+    gameState === "playing" &&
+    P.momentumFrames > 0 &&
+    (e.code === "ArrowLeft" || e.code === "ArrowRight")
+  ) e.preventDefault();
   if (e.repeat) return;
   const authModal = document.getElementById("auth-modal");
   if (authModal && !authModal.hidden) {
@@ -598,6 +696,11 @@ window.addEventListener("keydown", (e) => {
     if (c.startsWith("Digit")) {
       const n = Number(c.slice(5));
       if (n >= 1 && n <= ED_TOOLS.length) edTool = ED_TOOLS[n - 1].id;
+    }
+    if (c === "BracketLeft" || c === "BracketRight") {
+      const idx = ED_TOOLS.findIndex((tool) => tool.id === edTool);
+      const dir = c === "BracketRight" ? 1 : -1;
+      edTool = ED_TOOLS[(idx + dir + ED_TOOLS.length) % ED_TOOLS.length].id;
     }
     return;
   }
@@ -680,7 +783,7 @@ window.addEventListener("keyup", (e) => {
   if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") iUp(e);
 });
 
-function tapHandler(x, y) {
+function tapHandler(x, y, touchId) {
   if (gameState === "menu") {
     menuClickAt(x, y);
     return;
@@ -728,6 +831,29 @@ function tapHandler(x, y) {
     }
     gameState = "playing";
     return;
+  }
+  if (gameState === "playing" && P.momentumFrames > 0) {
+    const buttons = momentumControlButtons();
+    if (
+      x >= buttons.brake.x &&
+      x <= buttons.brake.x + buttons.brake.w &&
+      y >= buttons.brake.y &&
+      y <= buttons.brake.y + buttons.brake.h
+    ) {
+      momentumControl = "brake";
+      momentumControlTouch = touchId;
+      return;
+    }
+    if (
+      x >= buttons.accelerate.x &&
+      x <= buttons.accelerate.x + buttons.accelerate.w &&
+      y >= buttons.accelerate.y &&
+      y <= buttons.accelerate.y + buttons.accelerate.h
+    ) {
+      momentumControl = "accelerate";
+      momentumControlTouch = touchId;
+      return;
+    }
   }
   if (x > W - 100 && x < W - 55 && y < 50) {
     gameState = "paused";
@@ -843,7 +969,7 @@ canvas.addEventListener(
       };
       return;
     }
-    tapHandler(t.clientX, t.clientY);
+    tapHandler(t.clientX, t.clientY, t.identifier);
   },
   { passive: false }
 );
@@ -853,13 +979,20 @@ canvas.addEventListener(
     e.preventDefault();
     edPainting = false;
     if (e.touches.length < 2) editorTouchPan = null;
+    const lifted = e.changedTouches && e.changedTouches[0];
+    const prevControl = momentumControl;
+    const prevTouchId = momentumControlTouch;
+    iUp();
+    if (prevTouchId != null && lifted && lifted.identifier !== prevTouchId) {
+      momentumControl = prevControl;
+      momentumControlTouch = prevTouchId;
+    }
     if (touchMenuStart) {
       if (gameState === "menu" && menuScreen === "levels" && !touchMenuStart.moved) {
         menuClickAt(touchMenuStart.x, touchMenuStart.y);
       }
       touchMenuStart = null;
     }
-    iUp();
   },
   { passive: false }
 );
@@ -1508,6 +1641,7 @@ function ptInTri(px, py, x1, y1, x2, y2, x3, y3) {
 }
 
 function spikeHit(sx, sy) {
+  const size = playerSize();
   const tx1 = sx,
     ty1 = sy,
     tx2 = sx + SPIKE_W,
@@ -1517,10 +1651,10 @@ function spikeHit(sx, sy) {
   const s = COL_SHRINK;
   const corners = [
     [P.x + s, P.y + s],
-    [P.x + PS - s, P.y + s],
-    [P.x + s, P.y + PS - s],
-    [P.x + PS - s, P.y + PS - s],
-    [P.x + PS / 2, P.y + PS / 2],
+    [P.x + size - s, P.y + s],
+    [P.x + s, P.y + size - s],
+    [P.x + size - s, P.y + size - s],
+    [P.x + size / 2, P.y + size / 2],
   ];
   for (const [cx, cy] of corners) {
     if (ptInTri(cx, cy, tx1, ty1, tx2, ty2, tx3, ty3)) return true;
@@ -1529,6 +1663,7 @@ function spikeHit(sx, sy) {
 }
 
 function spikeHitDown(sx, sy) {
+  const size = playerSize();
   const tx1 = sx,
     ty1 = sy,
     tx2 = sx + SPIKE_W,
@@ -1538,10 +1673,10 @@ function spikeHitDown(sx, sy) {
   const s = COL_SHRINK;
   const corners = [
     [P.x + s, P.y + s],
-    [P.x + PS - s, P.y + s],
-    [P.x + s, P.y + PS - s],
-    [P.x + PS - s, P.y + PS - s],
-    [P.x + PS / 2, P.y + PS / 2],
+    [P.x + size - s, P.y + s],
+    [P.x + s, P.y + size - s],
+    [P.x + size - s, P.y + size - s],
+    [P.x + size / 2, P.y + size / 2],
   ];
   for (const [cx, cy] of corners) {
     if (ptInTri(cx, cy, tx1, ty1, tx2, ty2, tx3, ty3)) return true;
@@ -1559,7 +1694,8 @@ function isGround(wx) {
 
 function checkpointSafe() {
   if (!levelData) return false;
-  const clearance = Math.max(PS * 2, P.speed * 12);
+  const size = playerSize();
+  const clearance = Math.max(size * 2, P.speed * 12);
   for (const o of levelData.obs) {
     let left;
     let right;
@@ -1574,13 +1710,13 @@ function checkpointSafe() {
       left = o.x - radius;
       right = o.x + radius;
     } else if (o.type === "block" || o.type === "plat") {
-      if (P.y + PS <= o.y || P.y >= o.y + o.h) continue;
+      if (P.y + size <= o.y || P.y >= o.y + o.h) continue;
       left = o.x;
       right = o.x + o.w;
     } else {
       continue;
     }
-    if (P.x + PS + clearance > left && P.x - clearance < right) return false;
+    if (P.x + size + clearance > left && P.x - clearance < right) return false;
   }
   if (!P.isShip) return P.grounded;
   let ceil = CEIL_Y;
@@ -1588,14 +1724,14 @@ function checkpointSafe() {
   let walls = 0;
   for (const o of levelData.obs) {
     if (o.type !== "block" && o.type !== "plat") continue;
-    if (o.x > P.x + PS || o.x + o.w < P.x) continue;
+    if (o.x > P.x + size || o.x + o.w < P.x) continue;
     walls++;
     if (o.y <= CEIL_Y + 2) ceil = Math.max(ceil, o.y + o.h);
     else floor = Math.min(floor, o.y);
   }
-  if (floor - ceil < PS + 48) return false;
-  if (!walls) return P.y > CEIL_Y + 8 && P.y + PS < groundY - 8;
-  const mid = (ceil + floor) / 2 - PS / 2;
+  if (floor - ceil < size + 48) return false;
+  if (!walls) return P.y > CEIL_Y + 8 && P.y + size < groundY - 8;
+  const mid = (ceil + floor) / 2 - size / 2;
   return Math.abs(P.y - mid) < 26;
 }
 
@@ -1630,13 +1766,14 @@ function isValidGhost(ghost) {
   return ghost.points.every((point) => {
     if (
       !Array.isArray(point) ||
-      point.length !== 5 ||
+      (point.length !== 5 && point.length !== 6) ||
       !Number.isInteger(point[0]) ||
       point[0] <= lastFrame ||
       !Number.isFinite(point[1]) ||
       !Number.isFinite(point[2]) ||
       !Number.isFinite(point[3]) ||
-      (point[4] !== 0 && point[4] !== 1)
+      (point[4] !== 0 && point[4] !== 1) ||
+      (point.length === 6 && (!Number.isFinite(point[5]) || point[5] < 0.5 || point[5] > 2))
     ) return false;
     lastFrame = point[0];
     return true;
@@ -1689,7 +1826,7 @@ function beginGhostRun() {
   ghostRunGroundY = groundY;
   runGhostPoints = [];
   if (activeGhostKey) {
-    runGhostPoints.push([0, P.x, P.y, P.rot, P.isShip ? 1 : 0]);
+    runGhostPoints.push([0, P.x, P.y, P.rot, P.isShip ? 1 : 0, P.sizeScale]);
   }
 }
 
@@ -1697,7 +1834,7 @@ function recordGhostFrame() {
   if (!activeGhostKey) return;
   ghostFrame++;
   if (ghostFrame % GHOST_SAMPLE_FRAMES === 0 && runGhostPoints.length < MAX_GHOST_POINTS) {
-    runGhostPoints.push([ghostFrame, P.x, P.y, P.rot, P.isShip ? 1 : 0]);
+    runGhostPoints.push([ghostFrame, P.x, P.y, P.rot, P.isShip ? 1 : 0, P.sizeScale]);
   }
 }
 
@@ -1705,7 +1842,7 @@ function finishGhostRun(completed) {
   if (!activeGhostKey) return;
   const progress = completed ? 100 : getProgress();
   const last = runGhostPoints[runGhostPoints.length - 1];
-  const finalPoint = [ghostFrame, P.x, P.y, P.rot, P.isShip ? 1 : 0];
+  const finalPoint = [ghostFrame, P.x, P.y, P.rot, P.isShip ? 1 : 0, P.sizeScale];
   if (last && last[0] === ghostFrame) runGhostPoints[runGhostPoints.length - 1] = finalPoint;
   else if (runGhostPoints.length < MAX_GHOST_POINTS) runGhostPoints.push(finalPoint);
   else runGhostPoints[runGhostPoints.length - 1] = finalPoint;
@@ -1735,7 +1872,9 @@ function getGhostPosition(ghost) {
   while (next < points.length && points[next][0] < ghostFrame) next++;
   if (next >= points.length) {
     const last = points[points.length - 1];
-    return ghostFrame === last[0] ? last : null;
+    return ghostFrame === last[0]
+      ? [last[1], last[2], last[3], last[4], last[5] || 1]
+      : null;
   }
   const from = points[next - 1];
   const to = points[next];
@@ -1745,6 +1884,7 @@ function getGhostPosition(ghost) {
     from[2] + (to[2] - from[2]) * fraction,
     from[3] + (to[3] - from[3]) * fraction,
     fraction < 0.5 ? from[4] : to[4],
+    (from[5] || 1) + ((to[5] || 1) - (from[5] || 1)) * fraction,
   ];
 }
 
@@ -1802,8 +1942,9 @@ function kill() {
   deathNum++;
   shakeIntensity = 14;
   sfxDie();
-  emitP(P.x + PS / 2, P.y + PS / 2, "#ff0040", 28, 12);
-  emitP(P.x + PS / 2, P.y + PS / 2, "#ffcc00", 14, 8);
+  const emitSize = playerSize();
+  emitP(P.x + emitSize / 2, P.y + emitSize / 2, "#ff0040", 28, 12);
+  emitP(P.x + emitSize / 2, P.y + emitSize / 2, "#ffcc00", 14, 8);
   const prog = getProgress();
   if (!bestProg[currentLevelIdx] || prog > bestProg[currentLevelIdx]) {
     bestProg[currentLevelIdx] = prog;
@@ -1821,9 +1962,10 @@ function win() {
   bestProg[currentLevelIdx] = 100;
   save();
   sfxWin();
-  emitP(P.x + PS / 2, P.y + PS / 2, "#00ff88", 45, 14);
-  emitP(P.x + PS / 2, P.y + PS / 2, "#ffff00", 35, 10);
-  emitP(P.x + PS / 2, P.y + PS / 2, "#ff44ff", 25, 8);
+  const emitSize = playerSize();
+  emitP(P.x + emitSize / 2, P.y + emitSize / 2, "#00ff88", 45, 14);
+  emitP(P.x + emitSize / 2, P.y + emitSize / 2, "#ffff00", 35, 10);
+  emitP(P.x + emitSize / 2, P.y + emitSize / 2, "#ff44ff", 25, 8);
   stopMusic();
   levelFinishTime = (now() - levelTimer) / 1000;
 }
@@ -1832,6 +1974,8 @@ function win() {
 function update() {
   if (gameState !== "playing" || P.dead || P.done) return;
   if (!levelData) return;
+  const pSize = playerSize();
+  const timeScale = advancePortalEffects();
 
   recentPlayerStates.push(
     playerCheckpointSnapshot(P.x, P.y, P.isShip, P.speed, P.grounded)
@@ -1842,10 +1986,10 @@ function update() {
   inputJustDown = inputHeld && !_inputWasDown;
   _inputWasDown = inputHeld;
 
-  P.x += P.speed;
+  P.x += P.speed * timeScale;
 
   // Update trail
-  trail.push({ x: P.x + PS / 2, y: P.y + PS / 2, life: 1, rot: P.rot, ship: P.isShip });
+  trail.push({ x: P.x + pSize / 2, y: P.y + pSize / 2, life: 1, rot: P.rot, ship: P.isShip });
   if (trail.length > 18) trail.shift();
   for (let i = trail.length - 1; i >= 0; i--) {
     trail[i].life -= 0.06;
@@ -1860,28 +2004,38 @@ function update() {
       isShip: P.isShip,
       speed: P.speed,
       grounded: P.grounded,
+      sizeScale: P.sizeScale,
+      gravityScale: P.gravityScale,
+      extraJumps: P.extraJumps,
+      slowTimeFrames: P.slowTimeFrames,
+      momentumFrames: P.momentumFrames,
+      momentumBaseSpeed: P.momentumBaseSpeed,
     });
     lastCpX = P.x;
-    emitP(P.x + PS / 2, P.y + PS / 2, "#00ff88", 8, 3);
+    emitP(P.x + pSize / 2, P.y + pSize / 2, "#00ff88", 8, 3);
   }
 
   // Camera
   cameraX += (P.x - 250 - cameraX) * 0.12;
 
-  const solidBelow = isGround(P.x + PS / 2);
+  const solidBelow = isGround(P.x + pSize / 2);
 
   if (P.isShip) {
     // --- Ship mode ---
-    if (inputHeld) P.vy += SHIP_FLY;
-    else P.vy += SHIP_GRAV;
+    if (inputHeld) P.vy += SHIP_FLY * P.gravityScale * timeScale;
+    else P.vy += SHIP_GRAV * P.gravityScale * timeScale;
     P.vy = Math.max(-6.6, Math.min(6.6, P.vy));
-    P.y += P.vy;
+    P.y += P.vy * timeScale;
     if (P.y < CEIL_Y) {
       P.y = CEIL_Y;
       P.vy = 0;
     }
-    if (solidBelow && P.y + PS >= groundY) {
-      P.y = groundY - PS;
+    if (!solidBelow && P.y + pSize > groundY) {
+      kill();
+      return;
+    }
+    if (solidBelow && P.y + pSize >= groundY) {
+      P.y = groundY - pSize;
       P.vy = 0;
     }
     P.rot = P.vy * 2 * (Math.PI / 180);
@@ -1889,19 +2043,19 @@ function update() {
     // Block collisions in ship mode
     for (const o of levelData.obs) {
       if (o.type !== "plat" && o.type !== "block") continue;
-      if (rr(P.x + 5, P.y + 5, PS - 10, PS - 10, o.x, o.y, o.w, o.h)) {
+      if (rr(P.x + 5, P.y + 5, pSize - 10, pSize - 10, o.x, o.y, o.w, o.h)) {
         kill();
         return;
       }
     }
-    if (P.y > groundY + PS || P.y > H + 150) {
+    if (P.y > groundY + pSize || P.y > H + 150) {
       kill();
       return;
     }
   } else {
     // --- Cube mode ---
-    P.vy += GRAVITY;
-    P.y += P.vy;
+    P.vy += GRAVITY * P.gravityScale * timeScale;
+    P.y += P.vy * timeScale;
 
     let onPlat = false;
 
@@ -1911,12 +2065,15 @@ function update() {
         oy = o.y,
         ow = o.w,
         oh = o.h;
-      if (P.x + PS > ox && P.x < ox + ow) {
+      if (P.x + pSize > ox && P.x < ox + ow) {
         // Land on top
-        if (P.vy >= 0 && P.y + PS >= oy && P.y + PS <= oy + oh + P.vy + 2) {
-          P.y = oy - PS;
+        if (P.vy >= 0 && P.y + pSize >= oy && P.y + pSize <= oy + oh + P.vy + 2) {
+          P.y = oy - pSize;
           P.vy = 0;
-          if (!P.grounded) sfxLand();
+          if (!P.grounded) {
+            sfxLand();
+            P.extraJumps = 0;
+          }
           P.grounded = true;
           onPlat = true;
         }
@@ -1927,8 +2084,8 @@ function update() {
         }
       }
       // Side collision
-      if (P.y + PS > oy + 2 && P.y < oy + oh - 2) {
-        if (P.x + PS > ox && P.x + PS < ox + P.speed + 4 && P.x < ox) {
+      if (P.y + pSize > oy + 2 && P.y < oy + oh - 2) {
+        if (P.x + pSize > ox && P.x + pSize < ox + P.speed + 4 && P.x < ox) {
           kill();
           return;
         }
@@ -1936,14 +2093,15 @@ function update() {
     }
 
     // Ground
-    if (solidBelow && P.y + PS >= groundY) {
+    if (solidBelow && P.y + pSize >= groundY) {
       // If player's top is below ground level, they fell through a gap — kill them
       if (P.y > groundY) {
         kill();
         return;
       }
-      P.y = groundY - PS;
+      P.y = groundY - pSize;
       if (P.vy > 0 && !P.grounded) sfxLand();
+      if (!P.grounded) P.extraJumps = 0;
       P.grounded = true;
       coyoteFrames = 4;
       P.vy = 0;
@@ -1953,23 +2111,24 @@ function update() {
     }
 
     // Fell into gap / void — kill as soon as player falls a full tile below ground
-    if (P.y > groundY + PS) {
+    if (P.y > groundY + pSize) {
       kill();
       return;
     }
 
     // Jump
-    if (inputJustDown && (P.grounded || coyoteFrames > 0)) {
-      if (!P.grounded && Math.abs(P.y - (groundY - PS)) <= 10) {
-        P.y = groundY - PS;
+    if (inputJustDown && (P.grounded || coyoteFrames > 0 || P.extraJumps > 0)) {
+      if (!P.grounded && coyoteFrames > 0 && Math.abs(P.y - (groundY - pSize)) <= 10) {
+        P.y = groundY - pSize;
       }
       P.vy = JUMP_VEL;
+      if (!P.grounded && coyoteFrames <= 0) P.extraJumps--;
       P.grounded = false;
       coyoteFrames = 0;
       P.tgtRot += Math.PI / 2;
       sfxJump();
     } else if (coyoteFrames > 0) {
-      coyoteFrames--;
+      coyoteFrames = Math.max(0, coyoteFrames - timeScale);
     }
 
     // Rotation
@@ -2006,11 +2165,12 @@ function update() {
       case "pad":
         if (
           !o._hit &&
-          rr(P.x, P.y, PS, PS, o.x, groundY - 16, 40, 16)
+          rr(P.x, P.y, pSize, pSize, o.x, groundY - 16, 40, 16)
         ) {
           P.vy = PAD_JUMP;
           P.grounded = false;
           coyoteFrames = 0;
+          P.extraJumps = 0;
           P.tgtRot += Math.PI;
           sfxPad();
           o._hit = true;
@@ -2020,23 +2180,35 @@ function update() {
         if (
           inputHeld &&
           !o._hit &&
-          rr(P.x - 8, P.y - 8, PS + 16, PS + 16, o.x - 22, o.y - 22, 44, 44)
+          rr(P.x - 8, P.y - 8, pSize + 16, pSize + 16, o.x - 22, o.y - 22, 44, 44)
         ) {
           P.vy = ORB_JUMP;
           P.grounded = false;
           coyoteFrames = 0;
+          P.extraJumps = 0;
           P.tgtRot += Math.PI / 2;
           sfxOrb();
           o._hit = true;
         }
         break;
+      case "sizeSmallP":
+      case "sizeBigP":
+      case "bounceP":
+      case "lowGravP":
+      case "highGravP":
+      case "doubleJumpP":
+      case "slowTimeP":
+      case "momentumP":
+        activatePowerPortal(o, pSize);
+        break;
       case "speedP":
-        if (rr(P.x, P.y, PS, PS, o.x - 20, CEIL_Y, 40, groundY - CEIL_Y)) {
+        if (rr(P.x, P.y, pSize, pSize, o.x - 20, CEIL_Y, 40, groundY - CEIL_Y)) {
           P.speed = SPEEDS[o.spd] || BASE_SPEED;
+          if (P.momentumFrames > 0) P.momentumBaseSpeed = P.speed;
         }
         break;
       case "shipP":
-        if (rr(P.x, P.y, PS, PS, o.x - 18, CEIL_Y, 52, groundY - CEIL_Y)) {
+        if (rr(P.x, P.y, pSize, pSize, o.x - 18, CEIL_Y, 52, groundY - CEIL_Y)) {
           if (!P.isShip) {
             P.isShip = true;
             P.vy = -1.5;
@@ -2045,11 +2217,12 @@ function update() {
         }
         break;
       case "cubeP":
-        if (rr(P.x, P.y, PS, PS, o.x - 18, CEIL_Y, 52, groundY - CEIL_Y)) {
+        if (rr(P.x, P.y, pSize, pSize, o.x - 18, CEIL_Y, 52, groundY - CEIL_Y)) {
           if (P.isShip) {
             P.isShip = false;
             P.grounded = false;
             coyoteFrames = 0;
+            P.extraJumps = 0;
             P.vy = Math.min(P.vy, 2);
           }
         }
@@ -2058,8 +2231,8 @@ function update() {
         const sy =
           o.y +
           (o.my ? Math.sin(songTime() * (o.ms || 0.5) * Math.PI * 2) * o.my : 0);
-        const dist = Math.hypot(P.x + PS / 2 - o.x, P.y + PS / 2 - sy);
-        if (dist < (o.r || 18) + PS * 0.26) {
+        const dist = Math.hypot(P.x + pSize / 2 - o.x, P.y + pSize / 2 - sy);
+        if (dist < (o.r || 18) + pSize * 0.26) {
           kill();
           return;
         }
@@ -2068,7 +2241,7 @@ function update() {
       case "coin":
         if (
           !o._hit &&
-          Math.hypot(P.x + PS / 2 - o.x, P.y + PS / 2 - o.y) < 34
+          Math.hypot(P.x + pSize / 2 - o.x, P.y + pSize / 2 - o.y) < 34
         ) {
           o._hit = true;
           if (!coinsGot[currentLevelIdx]) coinsGot[currentLevelIdx] = {};
@@ -2080,14 +2253,14 @@ function update() {
         break;
       case "mover": {
         const my = o.y + Math.sin(now() * o.ms) * o.my;
-        if (rr(P.x + 5, P.y + 5, PS - 10, PS - 10, o.x, my, o.w, o.h)) {
+        if (rr(P.x + 5, P.y + 5, pSize - 10, pSize - 10, o.x, my, o.w, o.h)) {
           kill();
           return;
         }
         break;
       }
       case "finish":
-        if (rr(P.x, P.y, PS, PS, o.x - 10, CEIL_Y, 60, groundY - CEIL_Y)) {
+        if (rr(P.x, P.y, pSize, pSize, o.x - 10, CEIL_Y, 60, groundY - CEIL_Y)) {
           win();
           return;
         }
@@ -2427,6 +2600,45 @@ function drawObs() {
         ctx.stroke();
         break;
       }
+      case "sizeSmallP":
+      case "sizeBigP":
+      case "bounceP":
+      case "lowGravP":
+      case "highGravP":
+      case "doubleJumpP":
+      case "slowTimeP":
+      case "momentumP": {
+        const portals = {
+          sizeSmallP: { color: "#44ddff", mark: "-" },
+          sizeBigP: { color: "#ff66dd", mark: "+" },
+          bounceP: { color: "#ffbb44", mark: "^" },
+          lowGravP: { color: "#66ffbb", mark: "v" },
+          highGravP: { color: "#ff6655", mark: "!" },
+          doubleJumpP: { color: "#cc88ff", mark: "2" },
+          slowTimeP: { color: "#66aaff", mark: "T" },
+          momentumP: { color: "#ff9966", mark: "M" },
+        };
+        const portal = portals[o.type];
+        ctx.strokeStyle = portal.color;
+        ctx.shadowColor = portal.color;
+        ctx.shadowBlur = o._hit ? 4 : 18;
+        ctx.globalAlpha = o._hit ? 0.4 : 0.9;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(sx, CEIL_Y);
+        ctx.lineTo(sx, groundY);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = portal.color;
+        ctx.beginPath();
+        ctx.arc(sx, groundY - 52, 16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#101018";
+        ctx.font = 'bold 18px "Segoe UI", system-ui, sans-serif';
+        ctx.textAlign = "center";
+        ctx.fillText(portal.mark, sx, groundY - 46);
+        break;
+      }
       case "shipP":
       case "cubeP": {
         const c = o.type === "shipP" ? "#00ffcc" : "#ffcc00";
@@ -2552,8 +2764,9 @@ function drawGhostReplay() {
   ctx.beginPath();
   for (let i = 0; i < ghost.points.length; i++) {
     const point = ghost.points[i];
-    const sx = point[1] + PS / 2 - cameraX;
-    const sy = point[2] + yOffset + PS / 2;
+    const size = PS * (point[5] || 1);
+    const sx = point[1] + size / 2 - cameraX;
+    const sy = point[2] + yOffset + size / 2;
     if (i === 0) ctx.moveTo(sx, sy);
     else ctx.lineTo(sx, sy);
   }
@@ -2565,8 +2778,10 @@ function drawGhostReplay() {
 
   const position = getGhostPosition(ghost);
   if (position) {
-    ctx.translate(position[0] + PS / 2 - cameraX, position[1] + yOffset + PS / 2);
+    const scale = position[4] || 1;
+    ctx.translate(position[0] + (PS * scale) / 2 - cameraX, position[1] + yOffset + (PS * scale) / 2);
     ctx.rotate(position[2]);
+    ctx.scale(scale, scale);
     ctx.globalAlpha = 0.48;
     ctx.fillStyle = "#b879ff";
     ctx.strokeStyle = "#ead7ff";
@@ -2591,9 +2806,10 @@ function drawGhostReplay() {
 function drawPlayer() {
   drawGhostReplay();
   if (P.dead) return;
+  const size = playerSize();
   const dx = P.x - cameraX;
-  const cx = dx + PS / 2,
-    cy = P.y + PS / 2;
+  const cx = dx + size / 2,
+    cy = P.y + size / 2;
 
   if (practiceMode && checkpoints.length) {
     ctx.save();
@@ -2602,8 +2818,9 @@ function drawPlayer() {
     for (const cp of checkpoints) {
       const sx = cp.x - cameraX;
       if (sx < -10 || sx > W + 10) continue;
+      const cpSize = PS * (cp.sizeScale || 1);
       ctx.beginPath();
-      ctx.moveTo(sx, cp.y + PS);
+      ctx.moveTo(sx, cp.y + cpSize);
       ctx.lineTo(sx, cp.y - 24);
       ctx.stroke();
     }
@@ -2621,7 +2838,7 @@ function drawPlayer() {
       ctx.rotate(t.rot || 0);
       ctx.globalAlpha = t.life * 0.32;
       ctx.fillStyle = playerColor;
-      const sz = PS * (0.35 + t.life * 0.45);
+      const sz = size * (0.35 + t.life * 0.45);
       if (t.ship) {
         ctx.beginPath();
         ctx.moveTo(sz / 2, 0);
@@ -2652,6 +2869,7 @@ function drawPlayer() {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(P.rot);
+  ctx.scale(P.sizeScale, P.sizeScale);
 
   if (P.isShip) {
     ctx.save();
@@ -2726,7 +2944,7 @@ function drawPlayer() {
 
   // Trail sparkle particles
   if (gameState === "playing" && !P.dead && Math.random() < 0.3) {
-    emitP(P.x, P.y + PS, playerColor, 1, 3);
+    emitP(P.x, P.y + size, playerColor, 1, 3);
   }
 }
 
@@ -2738,6 +2956,14 @@ function pauseCheckpointButton() {
 function deathCheckpointButton() {
   const w = Math.min(270, W * 0.82);
   return { x: (W - w) / 2, y: Math.min(H / 2 + 112, H - 54), w, h: 34 };
+}
+
+function momentumControlButtons() {
+  const y = H - 58;
+  return {
+    brake: { x: 12, y, w: 76, h: 44 },
+    accelerate: { x: W - 88, y, w: 76, h: 44 },
+  };
 }
 
 function drawHUD() {
@@ -2828,6 +3054,38 @@ function drawHUD() {
   ctx.fillStyle = "rgba(255,255,255,0.45)";
   ctx.font = '20px "Segoe UI", system-ui, sans-serif';
   ctx.fillText(muted ? "\u{1F507}" : "\u{1F50A}", W - 20, 34);
+
+  if (P.slowTimeFrames > 0) {
+    ctx.fillStyle = "#88bbff";
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText("SLOW TIME  " + (P.slowTimeFrames / 60).toFixed(1) + "s", W / 2, 112);
+  }
+  if (P.momentumFrames > 0 && gameState === "playing") {
+    const buttons = momentumControlButtons();
+    for (const [action, label] of [["brake", "BRAKE"], ["accelerate", "BOOST"]]) {
+      const button = buttons[action];
+      const active = momentumControl === action;
+      ctx.fillStyle = active ? "rgba(255,153,102,0.4)" : "rgba(10,12,24,0.72)";
+      ctx.strokeStyle = "#ff9966";
+      ctx.lineWidth = 2;
+      rRect(button.x, button.y, button.w, button.h, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillText(label, button.x + button.w / 2, button.y + 27);
+    }
+    ctx.fillStyle = "#ffbb99";
+    ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText(
+      "Momentum: " + P.speed.toFixed(1) + "  \u00B7  A/D or \u2190/\u2192",
+      W / 2,
+      H - 66
+    );
+  }
 
   // Attempt flash (larger)
   if (attemptFlashAlpha > 0) {
@@ -3702,6 +3960,11 @@ function renderGameToText() {
       mode: P.isShip ? "ship" : "cube",
       grounded: P.grounded,
       speed: Math.round(P.speed * 100) / 100,
+      size: Math.round(playerSize() * 100) / 100,
+      gravityScale: P.gravityScale,
+      extraJumps: P.extraJumps,
+      slowTimeFrames: P.slowTimeFrames,
+      momentumFrames: P.momentumFrames,
     },
     obstacles: obs,
   };
@@ -3739,6 +4002,14 @@ const ED_TOOLS = [
   { id: "fast", label: "Fast", col: "#ff8800" },
   { id: "shipP", label: "Ship", col: "#00ffcc" },
   { id: "cubeP", label: "Cube", col: "#ffcc44" },
+  { id: "sizeSmallP", label: "Small", col: "#44ddff" },
+  { id: "sizeBigP", label: "Big", col: "#ff66dd" },
+  { id: "bounceP", label: "Bounce", col: "#ffbb44" },
+  { id: "lowGravP", label: "Low G", col: "#66ffbb" },
+  { id: "highGravP", label: "High G", col: "#ff6655" },
+  { id: "doubleJumpP", label: "Double", col: "#cc88ff" },
+  { id: "slowTimeP", label: "Slow", col: "#66aaff" },
+  { id: "momentumP", label: "Momentum", col: "#ff9966" },
   { id: "finish", label: "End", col: "#ffffff" },
   { id: "erase", label: "Erase", col: "#ff4455" },
 ];
@@ -3779,7 +4050,23 @@ function persistEditorStore() {
 }
 
 function edGroundTool(id) {
-  return id === "pad" || id === "gap" || id === "fast" || id === "shipP" || id === "cubeP" || id === "finish" || id === "spikeD";
+  return (
+    id === "pad" ||
+    id === "gap" ||
+    id === "fast" ||
+    id === "shipP" ||
+    id === "cubeP" ||
+    id === "sizeSmallP" ||
+    id === "sizeBigP" ||
+    id === "bounceP" ||
+    id === "lowGravP" ||
+    id === "highGravP" ||
+    id === "doubleJumpP" ||
+    id === "slowTimeP" ||
+    id === "momentumP" ||
+    id === "finish" ||
+    id === "spikeD"
+  );
 }
 
 function compileEditor(objs, name) {
@@ -3828,7 +4115,18 @@ function compileEditor(objs, name) {
     else if (e.type === "fast") o.push({ type: "speedP", x, spd: "fast" });
     else if (e.type === "shipP") o.push({ type: "shipP", x });
     else if (e.type === "cubeP") o.push({ type: "cubeP", x });
-    else if (e.type === "finish") o.push({ type: "finish", x });
+    else if (
+      e.type === "sizeSmallP" ||
+      e.type === "sizeBigP" ||
+      e.type === "bounceP" ||
+      e.type === "lowGravP" ||
+      e.type === "highGravP" ||
+      e.type === "doubleJumpP" ||
+      e.type === "slowTimeP" ||
+      e.type === "momentumP"
+    ) {
+      o.push({ type: e.type, x });
+    } else if (e.type === "finish") o.push({ type: "finish", x });
   }
   return {
     name: name || "Untitled",
