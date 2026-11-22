@@ -491,6 +491,96 @@ function initializeSupabase() {
   }
 }
 
+// -------------------- Discord Activity --------------------
+const DISCORD_CLIENT_ID = "1573589814748643448";
+const DISCORD_SDK_URL = "./discord-sdk.mjs";
+let discordSdk = null;
+let discordReady = false;
+let lastDiscordPresenceKey = "";
+
+async function initDiscordActivity() {
+  try {
+    const mod = await import(DISCORD_SDK_URL);
+    const DiscordSDK = mod.DiscordSDK || mod.default || mod;
+    discordSdk = new DiscordSDK(DISCORD_CLIENT_ID);
+    // ready() never resolves outside Discord — cap the wait.
+    await Promise.race([
+      discordSdk.ready(),
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
+    ]);
+    discordReady = true;
+    lastDiscordPresenceKey = "";
+    updateDiscordPresence(true);
+  } catch (e) {
+    discordSdk = null;
+    discordReady = false;
+  }
+}
+
+function discordPresencePayload() {
+  if (gameState === "menu") {
+    return { details: "In the menus", state: "Neon Dash" };
+  }
+  if (gameState === "editor") {
+    return { details: "Building a level", state: edName || "Untitled" };
+  }
+  if (!levelData) return null;
+  const lvl = levelData.name;
+  const prog = Math.round(getProgress());
+  if (gameState === "playing" || gameState === "paused") {
+    const state = practiceMode
+      ? `Practice • ${prog}%`
+      : `Attempt ${attemptNum} • ${prog}%`;
+    return { details: lvl, state };
+  }
+  if (gameState === "dead") {
+    return { details: lvl, state: `Wiped • Attempt ${attemptNum}` };
+  }
+  if (gameState === "complete") {
+    return { details: "Finished!", state: lvl };
+  }
+  return null;
+}
+
+function updateDiscordPresence(force) {
+  if (!discordReady || !discordSdk || !discordSdk.commands) return;
+  const p = discordPresencePayload();
+  if (!p) return;
+  const key = JSON.stringify(p);
+  if (!force && key === lastDiscordPresenceKey) return;
+  lastDiscordPresenceKey = key;
+  discordSdk.commands
+    .setActivity({
+      activity: {
+        type: 0,
+        details: p.details,
+        state: p.state,
+        assets: {
+          large_image: "logo",
+          large_text: "Neon Dash",
+          small_image: "icon",
+          small_text: playerName,
+        },
+        instance: false,
+      },
+    })
+    .catch(() => {});
+}
+
+setInterval(() => updateDiscordPresence(false), 4000);
+
+async function discordInvite() {
+  if (!discordReady || !discordSdk || !discordSdk.commands) {
+    showAccountMessage("Discord invite is only available inside Discord");
+    return;
+  }
+  try {
+    await discordSdk.commands.openInviteDialog();
+  } catch (e) {
+    showAccountMessage("Invite failed: " + (e && e.message ? e.message : "unknown error"));
+  }
+}
+
 function totalCoins(i) {
   return Object.keys(coinsGot[i] || {}).length;
 }
@@ -801,7 +891,7 @@ window.addEventListener("keydown", (e) => {
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
           ? 13
-          : 5;
+          : 6;
     if (c === "ArrowDown") menuSel = Math.min(menuSel + 1, max);
     if (c === "ArrowUp") menuSel = Math.max(menuSel - 1, 0);
     if (menuScreen === "levels" && (c === "ArrowDown" || c === "ArrowUp")) {
@@ -3837,6 +3927,7 @@ function drawAccountMenu() {
     { label: "Email sign in", color: "#44ddff" },
     { label: "Continue with Google", color: "#777777", comingSoon: true },
     { label: "Continue with Discord", color: "#5865F2" },
+    { label: "Discord invite", color: "#5865F2" },
     { label: "Sign out", color: "#ff6b6b" },
     { label: "\u2190  Back", color: "#aa88ff" },
   ];
@@ -3941,8 +4032,9 @@ function menuAction() {
     else if (menuSel === 1) openEmailAuth("signin");
     else if (menuSel === 2) window.alert("Google sign-in is coming soon!");
     else if (menuSel === 3) signInWithDiscord();
-    else if (menuSel === 4) signOutFromAccount();
-    else if (menuSel === 5) {
+    else if (menuSel === 4) discordInvite();
+    else if (menuSel === 5) signOutFromAccount();
+    else if (menuSel === 6) {
       menuScreen = "settings";
       menuSel = 12;
     }
@@ -4810,4 +4902,5 @@ function loop(ts) {
 
 initializeSupabase();
 initializeEditorFileTransfer();
+initDiscordActivity();
 requestAnimationFrame(loop);

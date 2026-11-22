@@ -5,6 +5,7 @@ const SHELL = [
   "./game.js",
   "./styles.css",
   "./supabase-config.js",
+  "./discord-sdk.mjs",
   "./icon.svg",
   "./icon-192.png",
   "./icon-512.png",
