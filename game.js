@@ -502,6 +502,7 @@ let discordAuthed = false;
 let discordAuthError = "";
 let discordPresenceError = "";
 let discordPresenceOk = false;
+let discordPresenceStored = "";
 let discordSessionStart = 0;
 let lastDiscordPresenceKey = "";
 
@@ -614,8 +615,9 @@ function updateDiscordPresence(force) {
         },
       },
     })
-    .then(() => {
+    .then((res) => {
       discordPresenceOk = true;
+      discordPresenceStored = res && res.details ? String(res.details) : "NO DETAILS";
     })
     .catch((err) => {
       discordPresenceError = err && err.message ? String(err.message) : String(err);
@@ -4945,7 +4947,7 @@ function drawDiscordBadge() {
         ? discordPresenceError
           ? "Discord connected • presence failed"
           : discordPresenceOk
-            ? "Discord connected • authed • presence ✓"
+            ? "Discord • " + discordPresenceStored.slice(0, 30)
             : "Discord connected • authed"
         : discordAuthError
           ? "Discord connected • auth failed"
