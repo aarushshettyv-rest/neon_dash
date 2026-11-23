@@ -521,7 +521,7 @@ async function initDiscordActivity() {
     await Promise.race([
       discordSdk.ready(),
       new Promise((resolve, reject) =>
-        setTimeout(() => reject(new Error("ready() timed out after 4s")), 4000)
+        setTimeout(() => reject(new Error("ready() timed out after 10s")), 10000)
       ),
     ]);
     discordReady = true;
