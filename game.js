@@ -606,6 +606,12 @@ function updateDiscordPresence(force) {
         timestamps: { start: Math.floor(discordSessionStart / 1000) },
         party: { size: [1, 0] },
         instance: true,
+        assets: {
+          large_image: "logo",
+          large_text: "Neon Dash",
+          small_image: "icon",
+          small_text: playerName,
+        },
       },
     })
     .then(() => {
