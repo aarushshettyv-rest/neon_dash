@@ -910,7 +910,9 @@ window.addEventListener("keydown", (e) => {
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
           ? 13
-          : 6;
+          : menuScreen === "account" && discordState === "ready"
+            ? 6
+            : 5;
     if (c === "ArrowDown") menuSel = Math.min(menuSel + 1, max);
     if (c === "ArrowUp") menuSel = Math.max(menuSel - 1, 0);
     if (menuScreen === "levels" && (c === "ArrowDown" || c === "ArrowUp")) {
@@ -3946,10 +3948,14 @@ function drawAccountMenu() {
     { label: "Email sign in", color: "#44ddff" },
     { label: "Continue with Google", color: "#777777", comingSoon: true },
     { label: "Continue with Discord", color: "#5865F2" },
-    { label: "Discord invite", color: "#5865F2" },
-    { label: "Sign out", color: "#ff6b6b" },
-    { label: "\u2190  Back", color: "#aa88ff" },
   ];
+  if (discordState === "ready") {
+    actions.push({ label: "Discord invite", color: "#5865F2" });
+  }
+  actions.push(
+    { label: "Sign out", color: "#ff6b6b" },
+    { label: "\u2190  Back", color: "#aa88ff" }
+  );
   const top = Math.min(H * 0.32, H - actions.length * gap - 12);
 
   ctx.save();
@@ -4047,13 +4053,14 @@ function menuAction() {
       menuSel = 0;
     }
   } else if (menuScreen === "account") {
+    const inviteOffset = discordState === "ready" ? 1 : 0;
     if (menuSel === 0) openEmailAuth("signup");
     else if (menuSel === 1) openEmailAuth("signin");
     else if (menuSel === 2) window.alert("Google sign-in is coming soon!");
     else if (menuSel === 3) signInWithDiscord();
-    else if (menuSel === 4) discordInvite();
-    else if (menuSel === 5) signOutFromAccount();
-    else if (menuSel === 6) {
+    else if (menuSel === 4 && inviteOffset) discordInvite();
+    else if (menuSel === 4 + inviteOffset) signOutFromAccount();
+    else if (menuSel === 5 + inviteOffset) {
       menuScreen = "settings";
       menuSel = 12;
     }
