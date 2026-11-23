@@ -498,6 +498,8 @@ let discordSdk = null;
 let discordReady = false;
 let discordState = "off"; // off | loading | ready | error
 let discordErrorMsg = "";
+let discordAuthed = false;
+let discordAuthError = "";
 let lastDiscordPresenceKey = "";
 
 function isDiscordActivityContext() {
@@ -542,8 +544,10 @@ async function initDiscordActivity() {
       });
       const { access_token } = await tokenRes.json();
       await discordSdk.commands.authenticate({ access_token });
+      discordAuthed = true;
       console.log("[discord] authenticated");
     } catch (e) {
+      discordAuthError = e && e.message ? String(e.message) : String(e);
       console.warn("[discord] auth failed:", e);
     }
     lastDiscordPresenceKey = "";
@@ -4927,7 +4931,11 @@ function drawDiscordBadge() {
   if (discordState === "off") return;
   const label =
     discordState === "ready"
-      ? "Discord connected"
+      ? discordAuthed
+        ? "Discord connected • authed"
+        : discordAuthError
+          ? "Discord connected • auth failed"
+          : "Discord connected • authing…"
       : discordState === "loading"
         ? "Discord…"
         : "Discord unavailable: " + discordErrorMsg.slice(0, 60);
