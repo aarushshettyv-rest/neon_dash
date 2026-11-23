@@ -527,6 +527,25 @@ async function initDiscordActivity() {
     discordReady = true;
     discordState = "ready";
     console.log("[discord] SDK ready");
+    try {
+      const { code } = await discordSdk.commands.authorize({
+        client_id: DISCORD_CLIENT_ID,
+        response_type: "code",
+        state: "",
+        prompt: "none",
+        scope: ["identify", "rpc.activities.write"],
+      });
+      const tokenRes = await fetch("/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const { access_token } = await tokenRes.json();
+      await discordSdk.commands.authenticate({ access_token });
+      console.log("[discord] authenticated");
+    } catch (e) {
+      console.warn("[discord] auth failed:", e);
+    }
     lastDiscordPresenceKey = "";
     updateDiscordPresence(true);
   } catch (e) {
