@@ -502,6 +502,7 @@ let discordAuthed = false;
 let discordAuthError = "";
 let discordPresenceError = "";
 let discordPresenceOk = false;
+let discordSessionStart = 0;
 let lastDiscordPresenceKey = "";
 
 function isDiscordActivityContext() {
@@ -530,6 +531,7 @@ async function initDiscordActivity() {
     ]);
     discordReady = true;
     discordState = "ready";
+    discordSessionStart = Date.now();
     console.log("[discord] SDK ready");
     try {
       const { code } = await discordSdk.commands.authorize({
@@ -601,7 +603,9 @@ function updateDiscordPresence(force) {
         type: 0,
         details: p.details,
         state: p.state,
-        instance: false,
+        timestamps: { start: Math.floor(discordSessionStart / 1000) },
+        party: { size: [1, 0] },
+        instance: true,
       },
     })
     .then(() => {
