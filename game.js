@@ -501,6 +501,7 @@ let discordErrorMsg = "";
 let discordAuthed = false;
 let discordAuthError = "";
 let discordPresenceError = "";
+let discordPresenceOk = false;
 let lastDiscordPresenceKey = "";
 
 function isDiscordActivityContext() {
@@ -600,14 +601,11 @@ function updateDiscordPresence(force) {
         type: 0,
         details: p.details,
         state: p.state,
-        assets: {
-          large_image: "logo",
-          large_text: "Neon Dash",
-          small_image: "icon",
-          small_text: playerName,
-        },
         instance: false,
       },
+    })
+    .then(() => {
+      discordPresenceOk = true;
     })
     .catch((err) => {
       discordPresenceError = err && err.message ? String(err.message) : String(err);
@@ -4936,7 +4934,9 @@ function drawDiscordBadge() {
       ? discordAuthed
         ? discordPresenceError
           ? "Discord connected • presence failed"
-          : "Discord connected • authed"
+          : discordPresenceOk
+            ? "Discord connected • authed • presence ✓"
+            : "Discord connected • authed"
         : discordAuthError
           ? "Discord connected • auth failed"
           : "Discord connected • authing…"
