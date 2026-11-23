@@ -500,6 +500,7 @@ let discordState = "off"; // off | loading | ready | error
 let discordErrorMsg = "";
 let discordAuthed = false;
 let discordAuthError = "";
+let discordPresenceError = "";
 let lastDiscordPresenceKey = "";
 
 function isDiscordActivityContext() {
@@ -609,6 +610,7 @@ function updateDiscordPresence(force) {
       },
     })
     .catch((err) => {
+      discordPresenceError = err && err.message ? String(err.message) : String(err);
       console.warn("[discord] setActivity failed:", err);
     });
 }
@@ -4932,7 +4934,9 @@ function drawDiscordBadge() {
   const label =
     discordState === "ready"
       ? discordAuthed
-        ? "Discord connected • authed"
+        ? discordPresenceError
+          ? "Discord connected • presence failed"
+          : "Discord connected • authed"
         : discordAuthError
           ? "Discord connected • auth failed"
           : "Discord connected • authing…"
