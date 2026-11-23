@@ -492,7 +492,7 @@ function initializeSupabase() {
 }
 
 // -------------------- Discord Activity --------------------
-const DISCORD_CLIENT_ID = "1573589814748643448";
+const DISCORD_CLIENT_ID = "1573705934876839967";
 const DISCORD_SDK_URL = "./discord-sdk.mjs";
 let discordSdk = null;
 let discordReady = false;
