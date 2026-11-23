@@ -496,9 +496,22 @@ const DISCORD_CLIENT_ID = "1573589814748643448";
 const DISCORD_SDK_URL = "./discord-sdk.mjs";
 let discordSdk = null;
 let discordReady = false;
+let discordState = "off"; // off | loading | ready | error
 let lastDiscordPresenceKey = "";
 
+function isDiscordActivityContext() {
+  try {
+    if (new URLSearchParams(window.location.search).has("frame_id")) return true;
+    const h = window.location.hostname;
+    return h.endsWith("discordsays.com") || h === "discord.com" || h.endsWith(".discord.com");
+  } catch (e) {
+    return false;
+  }
+}
+
 async function initDiscordActivity() {
+  if (!isDiscordActivityContext()) return;
+  discordState = "loading";
   try {
     const mod = await import(DISCORD_SDK_URL);
     const DiscordSDK = mod.DiscordSDK || mod.default || mod;
@@ -509,11 +522,15 @@ async function initDiscordActivity() {
       new Promise((resolve, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
     ]);
     discordReady = true;
+    discordState = "ready";
+    console.log("[discord] SDK ready");
     lastDiscordPresenceKey = "";
     updateDiscordPresence(true);
   } catch (e) {
     discordSdk = null;
     discordReady = false;
+    discordState = "error";
+    console.warn("[discord] init failed:", e);
   }
 }
 
@@ -564,7 +581,9 @@ function updateDiscordPresence(force) {
         instance: false,
       },
     })
-    .catch(() => {});
+    .catch((err) => {
+      console.warn("[discord] setActivity failed:", err);
+    });
 }
 
 setInterval(() => updateDiscordPresence(false), 4000);
@@ -4871,6 +4890,26 @@ function frame() {
     if (gameState === "dead") drawDeath();
     if (gameState === "complete") drawWin();
   }
+  drawDiscordBadge();
+}
+
+function drawDiscordBadge() {
+  if (discordState === "off") return;
+  const label =
+    discordState === "ready"
+      ? "Discord connected"
+      : discordState === "loading"
+        ? "Discord…"
+        : "Discord unavailable";
+  const col =
+    discordState === "ready" ? "#57f287" : discordState === "loading" ? "#fee75c" : "#ed4245";
+  ctx.save();
+  ctx.font = '11px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = "right";
+  ctx.fillStyle = col;
+  ctx.globalAlpha = 0.7;
+  ctx.fillText("◆ " + label, W - 12, H - 10);
+  ctx.restore();
 }
 
 function loop(ts) {
