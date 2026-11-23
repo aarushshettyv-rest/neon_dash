@@ -48,7 +48,7 @@ function now() {
 
 // -------------------- State --------------------
 let gameState = "menu"; // menu | playing | paused | dead | complete | editor
-let menuScreen = "main"; // main | levels | settings | account
+let menuScreen = "main"; // main | levels | settings | account | community
 let editorTesting = false;
 let menuSel = 0;
 let levelMenuScroll = 0;
@@ -950,8 +950,10 @@ window.addEventListener("keydown", (e) => {
 
   if (gameState === "menu") {
     const max = menuScreen === "main"
-      ? 5
-      : menuScreen === "levels"
+      ? 6
+      : menuScreen === "community"
+        ? 0
+        : menuScreen === "levels"
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
           ? 13
@@ -3639,6 +3641,7 @@ function drawMenu() {
       },
       { label: "\u2699  Settings", col: "#aa88ff" },
       { label: "\u2709  Get Updates", col: "#ffd43b" },
+      { label: "\u263E  Community", col: "#5865F2" },
     ];
     const bh = compact
       ? Math.min(38, Math.max(30, H * 0.09))
@@ -3788,11 +3791,54 @@ function drawMenu() {
     ctx.textAlign = "center";
     ctx.fillText("\u2190  Back", W / 2, backY + 28);
     menuBtns.push({ x: backBx, y: backY, w: backBw, h: bhBack, act: 99 });
+  } else if (menuScreen === "community") {
+    ctx.save();
+    ctx.shadowColor = "#5865F2";
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = "#fff";
+    ctx.font = `bold ${Math.min(42, W * 0.055)}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("Community", W / 2, H * 0.08);
+    ctx.restore();
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.font = `${Math.min(15, W * 0.02)}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("Join the Neon Dash Discord server", W / 2, H * 0.08 + 30, W * 0.8);
+
+    const backBw = Math.min(200, W * 0.28);
+    const backBx = W / 2 - backBw / 2;
+    const backY = H - 70;
+    const bhBack = 42;
+    const hov = menuSel === 0;
+    ctx.save();
+    if (hov) {
+      ctx.shadowColor = "#ff4444";
+      ctx.shadowBlur = 14;
+    }
+    ctx.fillStyle = hov ? "#ff4444" : "rgba(255,255,255,0.04)";
+    ctx.strokeStyle = "#ff4444";
+    ctx.lineWidth = hov ? 2.5 : 1.5;
+    rRect(backBx, backY, backBw, bhBack, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = hov ? "#000" : "#fff";
+    ctx.font = `bold ${Math.min(18, W * 0.024)}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("\u2190  Back", W / 2, backY + 28);
+    menuBtns.push({ x: backBx, y: backY, w: backBw, h: bhBack, act: 99 });
   } else if (menuScreen === "settings") {
     drawSettingsMenu();
   } else {
     drawAccountMenu();
   }
+}
+
+function syncDiscordWidget() {
+  const el = document.getElementById("discord-widget");
+  if (!el) return;
+  const show = gameState === "menu" && menuScreen === "community";
+  if (el.hidden === show) el.hidden = !show;
 }
 
 function drawSettingsMenu() {
@@ -4052,6 +4098,10 @@ function menuAction() {
       menuSel = 0;
       settingsMessage = "";
     } else if (menuSel === 5) window.location.href = "updates.html";
+    else if (menuSel === 6) {
+      menuScreen = "community";
+      menuSel = 0;
+    }
   } else if (menuScreen === "settings") {
     if (menuSel === 0) changePlayerName();
     else if (menuSel === 1) {
@@ -4123,7 +4173,7 @@ function menuAction() {
 function menuClickAt(mx, my) {
   for (const b of menuBtns) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      if (menuScreen === "main" && b.act < 6) {
+      if (menuScreen === "main" && b.act < 7) {
         menuSel = b.act;
         menuAction();
       } else if (menuScreen === "settings" || menuScreen === "account") {
@@ -4914,6 +4964,7 @@ function simulateFrame() {
 }
 
 function frame() {
+  syncDiscordWidget();
   // Decay screen shake
   if (shakeIntensity > 0) {
     shakeX = (Math.random() - 0.5) * shakeIntensity;
