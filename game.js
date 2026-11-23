@@ -497,6 +497,7 @@ const DISCORD_SDK_URL = "./discord-sdk.mjs";
 let discordSdk = null;
 let discordReady = false;
 let discordState = "off"; // off | loading | ready | error
+let discordErrorMsg = "";
 let lastDiscordPresenceKey = "";
 
 function isDiscordActivityContext() {
@@ -519,7 +520,9 @@ async function initDiscordActivity() {
     // ready() never resolves outside Discord — cap the wait.
     await Promise.race([
       discordSdk.ready(),
-      new Promise((resolve, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
+      new Promise((resolve, reject) =>
+        setTimeout(() => reject(new Error("ready() timed out after 4s")), 4000)
+      ),
     ]);
     discordReady = true;
     discordState = "ready";
@@ -530,6 +533,7 @@ async function initDiscordActivity() {
     discordSdk = null;
     discordReady = false;
     discordState = "error";
+    discordErrorMsg = e && e.message ? String(e.message) : String(e);
     console.warn("[discord] init failed:", e);
   }
 }
@@ -4907,7 +4911,7 @@ function drawDiscordBadge() {
       ? "Discord connected"
       : discordState === "loading"
         ? "Discord…"
-        : "Discord unavailable";
+        : "Discord unavailable: " + discordErrorMsg.slice(0, 60);
   const col =
     discordState === "ready" ? "#57f287" : discordState === "loading" ? "#fee75c" : "#ed4245";
   ctx.save();
