@@ -618,6 +618,12 @@ function updateDiscordPresence(force) {
     .then((res) => {
       discordPresenceOk = true;
       discordPresenceStored = res && res.details ? String(res.details) : "NO DETAILS";
+      try {
+        localStorage.setItem(
+          "discordPresenceResponse",
+          JSON.stringify({ at: new Date().toISOString(), response: res }, null, 2)
+        );
+      } catch (e) {}
     })
     .catch((err) => {
       discordPresenceError = err && err.message ? String(err.message) : String(err);
