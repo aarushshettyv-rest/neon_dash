@@ -13,14 +13,27 @@ const GROUND_RATIO = 0.78;
 const CEIL_Y = 40;
 
 function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   groundY = Math.floor(H * GROUND_RATIO);
 }
 resize();
 
+const coarsePointer =
+  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+
 // -------------------- Constants --------------------
 const PS = 38; // player size
+
+function camAnchor() {
+  return Math.min(250, Math.max(110, Math.round(W * 0.32)));
+}
 const GRAVITY = 0.95;
 const JUMP_VEL = -13;
 const SHIP_GRAV = 0.78;
@@ -793,7 +806,7 @@ function resetPlayer(fromCp) {
   P.dead = false;
   P.done = false;
   trail = [];
-  cameraX = P.x - 250;
+  cameraX = P.x - camAnchor();
   _inputWasDown = inputHeld;
   inputJustDown = false;
   if (levelData) {
@@ -1082,6 +1095,11 @@ canvas.addEventListener("mousedown", (e) => {
 canvas.addEventListener("mousemove", (e) => {
   editorMouse.x = e.clientX;
   editorMouse.y = e.clientY;
+  if (gameState === "editor" && edPanDrag) {
+    cameraX = Math.max(0, cameraX - (e.clientX - edPanDrag.x));
+    edPanDrag.x = e.clientX;
+    return;
+  }
   if (gameState === "editor" && edPainting) editorApply(e.clientX, e.clientY, edPaintErase);
 });
 canvas.addEventListener(
@@ -1108,12 +1126,20 @@ canvas.addEventListener(
     }
     if (gameState === "editor" && e.touches.length >= 2) {
       e.preventDefault();
+      edPanDrag = null;
       const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       if (editorTouchPan) cameraX = Math.max(0, cameraX - (centerX - editorTouchPan.x));
       editorTouchPan = { x: centerX };
       return;
     }
-    if (gameState !== "editor" || !edPainting) return;
+    if (gameState !== "editor") return;
+    if (edPanDrag) {
+      e.preventDefault();
+      cameraX = Math.max(0, cameraX - (t.clientX - edPanDrag.x));
+      edPanDrag.x = t.clientX;
+      return;
+    }
+    if (!edPainting) return;
     e.preventDefault();
     editorMouse.x = t.clientX;
     editorMouse.y = t.clientY;
@@ -1123,6 +1149,7 @@ canvas.addEventListener(
 );
 canvas.addEventListener("mouseup", (e) => {
   edPainting = false;
+  edPanDrag = null;
   iUp(e);
 });
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -1150,6 +1177,7 @@ canvas.addEventListener(
     if (gameState === "editor") {
       if (e.touches.length >= 2) {
         edPainting = false;
+        edPanDrag = null;
         editorTouchPan = {
           x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
         };
@@ -1178,6 +1206,7 @@ canvas.addEventListener(
     e.preventDefault();
     edPainting = false;
     if (e.touches.length < 2) editorTouchPan = null;
+    if (e.touches.length === 0) edPanDrag = null;
     const lifted = e.changedTouches && e.changedTouches[0];
     const prevControl = momentumControl;
     const prevTouchId = momentumControlTouch;
@@ -1212,6 +1241,7 @@ function goToMenu() {
   menuSel = 0;
   editorTesting = false;
   edPainting = false;
+  edPanDrag = null;
   stopMusic();
   particles = [];
 }
@@ -2217,7 +2247,7 @@ function update() {
   }
 
   // Camera
-  cameraX += (P.x - 250 - cameraX) * 0.12;
+  cameraX += (P.x - camAnchor() - cameraX) * 0.12;
 
   const solidBelow = isGround(P.x + pSize / 2);
 
@@ -3644,7 +3674,7 @@ function drawMenu() {
       { label: "\u263E  Community", col: "#5865F2" },
     ];
     const bh = compact
-      ? Math.min(38, Math.max(30, H * 0.09))
+      ? Math.min(coarsePointer ? 48 : 38, Math.max(coarsePointer ? 44 : 30, H * 0.09))
       : Math.min(54, Math.max(40, (H * 0.46) / items.length));
     const gap = bh + (compact ? 4 : 8);
     const top = compact
@@ -3843,8 +3873,8 @@ function syncDiscordWidget() {
 
 function drawSettingsMenu() {
   const compact = H < 400;
-  const rowHeight = compact ? 34 : 48;
-  const actionHeight = Math.min(compact ? 34 : 42, Math.max(28, H * 0.085));
+  const rowHeight = compact ? (coarsePointer ? 44 : 34) : 48;
+  const actionHeight = Math.min(compact ? (coarsePointer ? 44 : 34) : 42, Math.max(28, H * 0.085));
   ctx.save();
   ctx.shadowColor = "#aa88ff";
   ctx.shadowBlur = 18;
@@ -4294,6 +4324,7 @@ const ED_TOOLS = [
   { id: "slowTimeP", label: "Slow", col: "#66aaff" },
   { id: "momentumP", label: "Momentum", col: "#ff9966" },
   { id: "finish", label: "End", col: "#ffffff" },
+  { id: "pan", label: "Pan", col: "#7df9ff" },
   { id: "erase", label: "Erase", col: "#ff4455" },
 ];
 
@@ -4305,6 +4336,7 @@ let editorLevels = [];
 let edUndoStack = [];
 let edPainting = false;
 let edPaintErase = false;
+let edPanDrag = null;
 let edMsg = "";
 let edMsgT = 0;
 let edCam = 0;
@@ -4451,6 +4483,7 @@ function edUndo() {
 }
 
 function editorApply(mx, my, erase) {
+  if (edTool === "pan") return;
   if (my > H - editorBarH() || my < editorTopH()) return;
   const cell = editorCell(mx, my);
   if (erase || edTool === "erase") {
@@ -4482,6 +4515,10 @@ function editorDown(e) {
     editorTopClick(x, y);
     return;
   }
+  if (edTool === "pan") {
+    edPanDrag = { x };
+    return;
+  }
   edPainting = true;
   edPaintErase = e.button === 2;
   edStrokeStart();
@@ -4491,6 +4528,7 @@ function editorDown(e) {
 function openEditor() {
   editorTesting = false;
   edPainting = false;
+  edPanDrag = null;
   gameState = "editor";
   stopMusic();
   cameraX = Math.max(0, cameraX);
@@ -4501,6 +4539,7 @@ function returnToEditor() {
   finishGhostRun(false);
   editorTesting = false;
   edPainting = false;
+  edPanDrag = null;
   gameState = "editor";
   stopMusic();
   particles = [];
@@ -4616,7 +4655,7 @@ function importEditorFileContents(contents) {
     return;
   }
 
-  const validTypes = new Set(ED_TOOLS.filter((tool) => tool.id !== "erase").map((tool) => tool.id));
+  const validTypes = new Set(ED_TOOLS.filter((tool) => tool.id !== "erase" && tool.id !== "pan").map((tool) => tool.id));
   const importedObjects = [];
   for (const object of fileData.objs) {
     if (
@@ -4742,13 +4781,15 @@ function editorTopH() {
 
 function editorToolGeom() {
   const n = ED_TOOLS.length;
-  const gap = 4;
-  const pad = 8;
+  const touch = coarsePointer || W < 560;
+  const gap = touch ? 6 : 4;
+  const pad = touch ? 10 : 8;
   const w1 = Math.floor((W - pad * 2 - gap * (n - 1)) / n);
-  if (w1 >= 46) return { cols: n, w: w1, h: 34, rows: 1, gap, pad };
-  const cols = Math.max(4, Math.floor((W - pad * 2) / 52));
+  if (w1 >= (touch ? 58 : 46)) return { cols: n, w: w1, h: touch ? 44 : 34, rows: 1, gap, pad };
+  const minW = touch ? 58 : 52;
+  const cols = Math.max(4, Math.floor((W - pad * 2 + gap) / (minW + gap)));
   const w = Math.floor((W - pad * 2 - gap * (cols - 1)) / cols);
-  return { cols, w, h: 30, rows: Math.ceil(n / cols), gap, pad };
+  return { cols, w, h: touch ? 42 : 30, rows: Math.ceil(n / cols), gap, pad };
 }
 
 function pickEditorTool(mx, my) {
@@ -4804,9 +4845,9 @@ function editorHeaderButtons() {
     { id: "new", label: "New", col: "#ffcc44" },
     { id: "exit", label: "Exit", col: "#ff5566" },
   ];
-  const gap = W < 500 ? 3 : 6;
-  const w = Math.min(64, Math.floor((W - 12 - gap * (labels.length - 1)) / labels.length));
-  const h = 26;
+  const gap = coarsePointer ? 6 : W < 500 ? 3 : 6;
+  const w = Math.min(coarsePointer ? 88 : 64, Math.floor((W - 12 - gap * (labels.length - 1)) / labels.length));
+  const h = coarsePointer ? 42 : 26;
   const y = 8;
   return labels.map((b, i) => ({
     ...b,
@@ -4837,7 +4878,7 @@ function drawEditorGrid() {
   }
   ctx.restore();
 
-  if (editorMouse.y > editorTopH() && editorMouse.y < H - editorBarH()) {
+  if (edTool !== "pan" && editorMouse.y > editorTopH() && editorMouse.y < H - editorBarH()) {
     const cell = editorCell(editorMouse.x, editorMouse.y);
     const sx = cell.gx * ED_GRID - cameraX;
     const sy = groundY - (cell.gy + 1) * ED_GRID;
@@ -4936,7 +4977,9 @@ function drawEditorUI() {
   ctx.fillStyle = "rgba(255,255,255,0.35)";
   ctx.font = '12px "Segoe UI", system-ui, sans-serif';
   ctx.textAlign = "left";
-  ctx.fillText("Click build   \u00B7   right click erase   \u00B7   A/D pan   \u00B7   Ctrl+Z undo   \u00B7   Enter play", 12, barTop - 8);
+  ctx.fillText(coarsePointer
+    ? "Tap build   \u00B7   Erase tool   \u00B7   Pan tool / two-finger drag   \u00B7   Enter play"
+    : "Click build   \u00B7   right click erase   \u00B7   A/D or Pan tool   \u00B7   Ctrl+Z undo   \u00B7   Enter play", 12, barTop - 8);
   ctx.restore();
 }
 
