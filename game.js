@@ -1008,7 +1008,7 @@ window.addEventListener("keydown", (e) => {
 
   if (gameState === "menu") {
     const max = menuScreen === "main"
-      ? 7
+      ? 6
       : menuScreen === "community"
         ? 0
         : menuScreen === "levels"
@@ -3664,6 +3664,23 @@ function drawMenu() {
 
   menuBtns = [];
 
+  // Settings cogwheel — top-left corner on list-style menu screens
+  if (menuScreen !== "settings" && menuScreen !== "account") {
+    const gearSize = Math.min(40, Math.max(34, H * 0.06));
+    const gx = 14;
+    const gy = 12;
+    ctx.save();
+    ctx.shadowColor = "#aa88ff";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = "rgba(170,136,255,0.85)";
+    ctx.font = `bold ${gearSize}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("\u2699", gx, gy);
+    ctx.restore();
+    menuBtns.push({ x: gx - 4, y: gy - 4, w: gearSize + 8, h: gearSize + 8, act: 98 });
+  }
+
   if (menuScreen === "main") {
     const compact = H < 420;
     // Title with double glow
@@ -3714,7 +3731,6 @@ function drawMenu() {
         label: "Sound: " + (muted ? "OFF" : "ON"),
         col: muted ? "#ff4444" : "#555",
       },
-      { label: "\u2699  Settings", col: "#aa88ff" },
       { label: "\u2709  Get Updates", col: "#ffd43b" },
       { label: "\u263E  Community", col: "#5865F2" },
       { label: "Account", col: "#ffd43b" },
@@ -4182,15 +4198,11 @@ function menuAction() {
     } else if (menuSel === 1) openEditor();
     else if (menuSel === 2) practiceMode = !practiceMode;
     else if (menuSel === 3) muted = !muted;
-    else if (menuSel === 4) {
-      menuScreen = "settings";
-      menuSel = 0;
-      settingsMessage = "";
-    } else if (menuSel === 5) window.location.href = "updates.html";
-    else if (menuSel === 6) {
+    else if (menuSel === 4) window.location.href = "updates.html";
+    else if (menuSel === 5) {
       menuScreen = "community";
       menuSel = 0;
-    } else if (menuSel === 7) {
+    } else if (menuSel === 6) {
       menuScreen = "account";
       menuSel = 0;
     }
@@ -4267,12 +4279,16 @@ function menuAction() {
 function menuClickAt(mx, my) {
   for (const b of menuBtns) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      if (menuScreen === "main" && b.act < 8) {
+      if (menuScreen === "main" && b.act < 7) {
         menuSel = b.act;
         menuAction();
       } else if (menuScreen === "settings" || menuScreen === "account") {
         menuSel = b.act;
         menuAction();
+      } else if (b.act === 98) {
+        menuScreen = "settings";
+        menuSel = 0;
+        settingsMessage = "";
       } else if (b.act >= 10 && b.act < 10 + levels.length + editorLevels.length)
         selectMenuLevel(b.act - 10);
       else if (b.act === 99) {
