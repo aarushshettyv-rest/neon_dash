@@ -523,7 +523,12 @@ function isDiscordActivityContext() {
   try {
     if (new URLSearchParams(window.location.search).has("frame_id")) return true;
     const h = window.location.hostname;
-    return h.endsWith("discordsays.com") || h === "discord.com" || h.endsWith(".discord.com");
+    return (
+      h === "discordsays.com" ||
+      h.endsWith(".discordsays.com") ||
+      h === "discord.com" ||
+      h.endsWith(".discord.com")
+    );
   } catch (e) {
     return false;
   }
