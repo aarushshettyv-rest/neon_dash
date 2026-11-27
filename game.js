@@ -516,7 +516,7 @@ let discordAuthError = "";
 let discordPresenceError = "";
 let discordPresenceOk = false;
 let discordPresenceStored = "";
-let discordSessionStart = 0;
+let discordSessionStart = Date.now();
 let lastDiscordPresenceKey = "";
 
 function isDiscordActivityContext() {
@@ -644,7 +644,52 @@ function updateDiscordPresence(force) {
     });
 }
 
-setInterval(() => updateDiscordPresence(false), 4000);
+setInterval(() => {
+  updateDiscordPresence(false);
+  updateDesktopPresence();
+}, 4000);
+
+// -------------------- Desktop app presence (WebView2 -> Discord IPC) --------------------
+let desktopRpcStatus = "";
+let lastDesktopPresenceKey = "";
+
+function desktopWebView() {
+  return window.chrome && window.chrome.webview ? window.chrome.webview : null;
+}
+
+(function initDesktopBridge() {
+  const wv = desktopWebView();
+  if (!wv || !wv.addEventListener) return;
+  wv.addEventListener("message", (e) => {
+    const d = e.data;
+    if (d && d.kind === "rpcStatus") desktopRpcStatus = String(d.state || "");
+  });
+})();
+
+function updateDesktopPresence() {
+  const wv = desktopWebView();
+  if (!wv || !wv.postMessage) return;
+  const p = discordPresencePayload();
+  if (!p) return;
+  const activity = {
+    type: 0,
+    details: p.details,
+    state: p.state,
+    timestamps: { start: Math.floor(discordSessionStart / 1000) },
+    party: { size: [1, 0] },
+    instance: true,
+    assets: {
+      large_image: "logo",
+      large_text: "Neon Dash",
+      small_image: "icon",
+      small_text: playerName,
+    },
+  };
+  const key = JSON.stringify(activity);
+  if (key === lastDesktopPresenceKey) return;
+  lastDesktopPresenceKey = key;
+  wv.postMessage({ kind: "presence", activity });
+}
 
 async function discordInvite() {
   if (!discordReady || !discordSdk || !discordSdk.commands) {
@@ -3674,7 +3719,7 @@ function drawMenu() {
       { label: "\u263E  Community", col: "#5865F2" },
     ];
     const bh = compact
-      ? Math.min(coarsePointer ? 48 : 38, Math.max(coarsePointer ? 44 : 30, H * 0.09))
+      ? Math.min(coarsePointer ? 44 : 38, Math.max(coarsePointer ? 38 : 30, H * 0.09))
       : Math.min(54, Math.max(40, (H * 0.46) / items.length));
     const gap = bh + (compact ? 4 : 8);
     const top = compact
@@ -3873,8 +3918,8 @@ function syncDiscordWidget() {
 
 function drawSettingsMenu() {
   const compact = H < 400;
-  const rowHeight = compact ? (coarsePointer ? 44 : 34) : 48;
-  const actionHeight = Math.min(compact ? (coarsePointer ? 44 : 34) : 42, Math.max(28, H * 0.085));
+  const rowHeight = compact ? (coarsePointer ? 40 : 34) : 48;
+  const actionHeight = Math.min(compact ? (coarsePointer ? 40 : 34) : 42, Math.max(28, H * 0.085));
   ctx.save();
   ctx.shadowColor = "#aa88ff";
   ctx.shadowBlur = 18;
@@ -4781,12 +4826,12 @@ function editorTopH() {
 
 function editorToolGeom() {
   const n = ED_TOOLS.length;
-  const touch = coarsePointer || W < 560;
+  const touch = coarsePointer && H >= 520;
   const gap = touch ? 6 : 4;
   const pad = touch ? 10 : 8;
   const w1 = Math.floor((W - pad * 2 - gap * (n - 1)) / n);
   if (w1 >= (touch ? 58 : 46)) return { cols: n, w: w1, h: touch ? 44 : 34, rows: 1, gap, pad };
-  const minW = touch ? 58 : 52;
+  const minW = touch ? 58 : 46;
   const cols = Math.max(4, Math.floor((W - pad * 2 + gap) / (minW + gap)));
   const w = Math.floor((W - pad * 2 - gap * (cols - 1)) / cols);
   return { cols, w, h: touch ? 42 : 30, rows: Math.ceil(n / cols), gap, pad };
@@ -4847,7 +4892,7 @@ function editorHeaderButtons() {
   ];
   const gap = coarsePointer ? 6 : W < 500 ? 3 : 6;
   const w = Math.min(coarsePointer ? 88 : 64, Math.floor((W - 12 - gap * (labels.length - 1)) / labels.length));
-  const h = coarsePointer ? 42 : 26;
+  const h = H < 500 ? 30 : coarsePointer ? 42 : 26;
   const y = 8;
   return labels.map((b, i) => ({
     ...b,
@@ -5040,8 +5085,16 @@ function frame() {
 }
 
 function drawDiscordBadge() {
-  if (discordState === "off") return;
-  const label =
+  if (discordState === "off" && !desktopRpcStatus) return;
+  let label, col;
+  if (desktopRpcStatus) {
+    label =
+      desktopRpcStatus === "connected"
+        ? "Discord RPC • connected"
+        : "Discord RPC • " + desktopRpcStatus;
+    col = desktopRpcStatus === "connected" ? "#57f287" : "#fee75c";
+  } else {
+  label =
     discordState === "ready"
       ? discordAuthed
         ? discordPresenceError
@@ -5055,8 +5108,9 @@ function drawDiscordBadge() {
       : discordState === "loading"
         ? "Discord…"
         : "Discord unavailable: " + discordErrorMsg.slice(0, 60);
-  const col =
+  col =
     discordState === "ready" ? "#57f287" : discordState === "loading" ? "#fee75c" : "#ed4245";
+  }
   ctx.save();
   ctx.font = '11px "Segoe UI", system-ui, sans-serif';
   ctx.textAlign = "right";

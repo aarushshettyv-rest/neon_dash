@@ -1,2 +1,12 @@
 Demonic-Saw.ndcl
 .github/copilot-instructions.md
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Node.js
+node_modules/
+
+# Logs
+npm-debug.log*
