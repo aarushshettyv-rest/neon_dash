@@ -1008,13 +1008,13 @@ window.addEventListener("keydown", (e) => {
 
   if (gameState === "menu") {
     const max = menuScreen === "main"
-      ? 6
+      ? 7
       : menuScreen === "community"
         ? 0
         : menuScreen === "levels"
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
-          ? 13
+          ? 16
           : menuScreen === "account" && discordState === "ready"
             ? 6
             : 5;
@@ -3717,6 +3717,7 @@ function drawMenu() {
       { label: "\u2699  Settings", col: "#aa88ff" },
       { label: "\u2709  Get Updates", col: "#ffd43b" },
       { label: "\u263E  Community", col: "#5865F2" },
+      { label: "Account", col: "#ffd43b" },
     ];
     const bh = compact
       ? Math.min(coarsePointer ? 44 : 38, Math.max(coarsePointer ? 38 : 30, H * 0.09))
@@ -4079,18 +4080,31 @@ function drawSettingsMenu() {
   menuBtns.push(account);
 
   const backY = Math.max(H * 0.89, actionY + actionHeight + 8);
-  const back = { x: W / 2 - 100, y: backY, w: 200, h: actionHeight, act: 13 };
-  ctx.fillStyle = menuSel === back.act ? "#aa88ff" : "rgba(255,255,255,0.04)";
-  ctx.strokeStyle = "#aa88ff";
-  ctx.lineWidth = menuSel === back.act ? 2 : 1;
-  rRect(back.x, back.y, back.w, back.h, 9);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = menuSel === back.act ? "#101018" : "#fff";
-  ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
-  ctx.font = `bold ${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
-  ctx.fillText("\u2190  Back", W / 2, back.y + back.h * 0.65);
-  menuBtns.push(back);
+  const backW = Math.min(110, bw * 0.26);
+  const linkW = Math.floor((bw - backW - 18) / 3);
+  const linkRow = [
+    { label: "\u2190  Back", act: 13, col: "#aa88ff" },
+    { label: "Updates", act: 14, col: "#ffd43b" },
+    { label: "Privacy", act: 15, col: "#66ddff" },
+    { label: "Terms", act: 16, col: "#cc88ff" },
+  ];
+  let lx = bx;
+  linkRow.forEach((b, i) => {
+    const lw = i === 0 ? backW : linkW;
+    const hov = menuSel === b.act;
+    ctx.fillStyle = hov ? colorAlpha(b.col, 0.24) : "rgba(255,255,255,0.04)";
+    ctx.strokeStyle = b.col;
+    ctx.lineWidth = hov ? 2 : 1;
+    rRect(lx, backY, lw, actionHeight, 9);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = hov ? "#fff" : "rgba(255,255,255,0.85)";
+    ctx.font = `bold ${compact ? 10 : 12}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(b.label, lx + lw / 2, backY + actionHeight * 0.65, lw - 8);
+    menuBtns.push({ x: lx, y: backY, w: lw, h: actionHeight, act: b.act });
+    lx += lw + 6;
+  });
 
   if (settingsMessageT > 0) {
     settingsMessageT--;
@@ -4176,6 +4190,9 @@ function menuAction() {
     else if (menuSel === 6) {
       menuScreen = "community";
       menuSel = 0;
+    } else if (menuSel === 7) {
+      menuScreen = "account";
+      menuSel = 0;
     }
   } else if (menuScreen === "settings") {
     if (menuSel === 0) changePlayerName();
@@ -4221,7 +4238,9 @@ function menuAction() {
     } else if (menuSel === 13) {
       menuScreen = "main";
       menuSel = 0;
-    }
+    } else if (menuSel === 14) window.location.href = "updates.html";
+    else if (menuSel === 15) window.location.href = "privacy.html";
+    else if (menuSel === 16) window.location.href = "terms.html";
   } else if (menuScreen === "account") {
     const inviteOffset = discordState === "ready" ? 1 : 0;
     if (menuSel === 0) openEmailAuth("signup");
@@ -4248,7 +4267,7 @@ function menuAction() {
 function menuClickAt(mx, my) {
   for (const b of menuBtns) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      if (menuScreen === "main" && b.act < 7) {
+      if (menuScreen === "main" && b.act < 8) {
         menuSel = b.act;
         menuAction();
       } else if (menuScreen === "settings" || menuScreen === "account") {
