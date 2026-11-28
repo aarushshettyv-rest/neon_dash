@@ -3711,7 +3711,7 @@ function drawMenu() {
     // Title with double glow
     ctx.save();
     ctx.shadowColor = "#00ff88";
-    ctx.shadowBlur = 45;
+    ctx.shadowBlur = 30 + Math.sin(now() * 0.004) * 15;
     ctx.fillStyle = "#fff";
     const titleSize = Math.min(68, W * 0.085, compact ? H * 0.08 : 68);
     ctx.font = `bold ${titleSize}px "Segoe UI", system-ui, sans-serif`;
@@ -3766,6 +3766,15 @@ function drawMenu() {
     const top = compact
       ? Math.min(H * 0.29, H - 24 - items.length * gap)
       : Math.min(H * 0.34, H - 28 - items.length * gap);
+
+    // Soft glow behind the button column
+    const glowCy = top + (items.length * gap) / 2;
+    const glow = ctx.createRadialGradient(W / 2, glowCy, 10, W / 2, glowCy, H * 0.45);
+    glow.addColorStop(0, "rgba(120,80,255,0.08)");
+    glow.addColorStop(1, "rgba(120,80,255,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+
     items.forEach((it, i) => {
       const by = top + i * gap;
       const hov = menuSel === i;
@@ -3774,22 +3783,22 @@ function drawMenu() {
         ctx.shadowColor = it.col;
         ctx.shadowBlur = 18;
       }
-      // Button fill with gradient on hover
+      const grd = ctx.createLinearGradient(bx, by, bx, by + bh);
       if (hov) {
-        const grd = ctx.createLinearGradient(bx, by, bx + bw, by);
         grd.addColorStop(0, it.col);
-        grd.addColorStop(1, colorAlpha(it.col, 0.8));
-        ctx.fillStyle = grd;
+        grd.addColorStop(1, colorAlpha(it.col, 0.75));
       } else {
-        ctx.fillStyle = "rgba(255,255,255,0.04)";
+        grd.addColorStop(0, colorAlpha(it.col, 0.14));
+        grd.addColorStop(1, colorAlpha(it.col, 0.05));
       }
-      ctx.strokeStyle = it.col;
+      ctx.fillStyle = grd;
+      ctx.strokeStyle = hov ? it.col : colorAlpha(it.col, 0.45);
       ctx.lineWidth = hov ? 2.5 : 1.5;
       rRect(bx, by, bw, bh, 12);
       ctx.fill();
       ctx.stroke();
       ctx.restore();
-      ctx.fillStyle = hov ? "#000" : "#fff";
+      ctx.fillStyle = hov ? "#000" : "rgba(255,255,255,0.92)";
       ctx.font = `bold ${Math.min(20, W * 0.028)}px "Segoe UI", system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.fillText(it.label, W / 2, by + bh * 0.64);
@@ -3836,15 +3845,16 @@ function drawMenu() {
         ctx.shadowColor = col;
         ctx.shadowBlur = 18;
       }
+      const grd = ctx.createLinearGradient(bx, by, bx, by + bh);
       if (hov) {
-        const grd = ctx.createLinearGradient(bx, by, bx + bw, by);
         grd.addColorStop(0, col);
         grd.addColorStop(1, colorAlpha(col, 0.7));
-        ctx.fillStyle = grd;
       } else {
-        ctx.fillStyle = "rgba(255,255,255,0.04)";
+        grd.addColorStop(0, colorAlpha(col, 0.12));
+        grd.addColorStop(1, colorAlpha(col, 0.04));
       }
-      ctx.strokeStyle = col;
+      ctx.fillStyle = grd;
+      ctx.strokeStyle = hov ? col : colorAlpha(col, 0.4);
       ctx.lineWidth = hov ? 2.5 : 1.5;
       rRect(bx, by, bw, bh, 12);
       ctx.fill();
@@ -3852,7 +3862,7 @@ function drawMenu() {
       ctx.restore();
 
       // Level name
-      ctx.fillStyle = hov ? "#000" : "#fff";
+      ctx.fillStyle = hov ? "#000" : "rgba(255,255,255,0.92)";
       ctx.font = `bold ${Math.min(22, W * 0.03)}px "Segoe UI", system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.fillText(lv.name, W / 2, by + 25, bw - 28);
@@ -3895,14 +3905,22 @@ function drawMenu() {
       ctx.shadowColor = "#ff4444";
       ctx.shadowBlur = 14;
     }
-    ctx.fillStyle = hov ? "#ff4444" : "rgba(255,255,255,0.04)";
-    ctx.strokeStyle = "#ff4444";
+    const grdBack = ctx.createLinearGradient(backBx, backY, backBx, backY + bhBack);
+    if (hov) {
+      grdBack.addColorStop(0, "#ff4444");
+      grdBack.addColorStop(1, colorAlpha("#ff4444", 0.75));
+    } else {
+      grdBack.addColorStop(0, colorAlpha("#ff4444", 0.12));
+      grdBack.addColorStop(1, colorAlpha("#ff4444", 0.05));
+    }
+    ctx.fillStyle = grdBack;
+    ctx.strokeStyle = hov ? "#ff4444" : colorAlpha("#ff4444", 0.45);
     ctx.lineWidth = hov ? 2.5 : 1.5;
     rRect(backBx, backY, backBw, bhBack, 12);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    ctx.fillStyle = hov ? "#000" : "#fff";
+    ctx.fillStyle = hov ? "#000" : "rgba(255,255,255,0.92)";
     ctx.font = `bold ${Math.min(18, W * 0.024)}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.fillText("\u2190  Back", W / 2, backY + 28);
@@ -3931,14 +3949,22 @@ function drawMenu() {
       ctx.shadowColor = "#ff4444";
       ctx.shadowBlur = 14;
     }
-    ctx.fillStyle = hov ? "#ff4444" : "rgba(255,255,255,0.04)";
-    ctx.strokeStyle = "#ff4444";
+    const grdBack = ctx.createLinearGradient(backBx, backY, backBx, backY + bhBack);
+    if (hov) {
+      grdBack.addColorStop(0, "#ff4444");
+      grdBack.addColorStop(1, colorAlpha("#ff4444", 0.75));
+    } else {
+      grdBack.addColorStop(0, colorAlpha("#ff4444", 0.12));
+      grdBack.addColorStop(1, colorAlpha("#ff4444", 0.05));
+    }
+    ctx.fillStyle = grdBack;
+    ctx.strokeStyle = hov ? "#ff4444" : colorAlpha("#ff4444", 0.45);
     ctx.lineWidth = hov ? 2.5 : 1.5;
     rRect(backBx, backY, backBw, bhBack, 12);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    ctx.fillStyle = hov ? "#000" : "#fff";
+    ctx.fillStyle = hov ? "#000" : "rgba(255,255,255,0.92)";
     ctx.font = `bold ${Math.min(18, W * 0.024)}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.fillText("\u2190  Back", W / 2, backY + 28);
