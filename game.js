@@ -654,6 +654,26 @@ setInterval(() => {
   updateDesktopPresence();
 }, 4000);
 
+// -------------------- PWA install --------------------
+let deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+});
+
+async function installPwa() {
+  if (window.chrome && window.chrome.webview) return; // already a desktop app
+  if (!deferredInstallPrompt) {
+    showSettingsMessage("Use your browser's install/install-app option", true);
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  try {
+    await deferredInstallPrompt.userChoice;
+  } catch (e) {}
+  deferredInstallPrompt = null;
+}
+
 // -------------------- Desktop app presence (WebView2 -> Discord IPC) --------------------
 let desktopRpcStatus = "";
 let lastDesktopPresenceKey = "";
@@ -1013,13 +1033,13 @@ window.addEventListener("keydown", (e) => {
 
   if (gameState === "menu") {
     const max = menuScreen === "main"
-      ? 6
+      ? 5
       : menuScreen === "community"
         ? 0
         : menuScreen === "levels"
         ? levels.length + editorLevels.length
         : menuScreen === "settings"
-          ? 16
+          ? 17
           : menuScreen === "account" && discordState === "ready"
             ? 6
             : 5;
@@ -3736,7 +3756,6 @@ function drawMenu() {
         label: "Sound: " + (muted ? "OFF" : "ON"),
         col: muted ? "#ff4444" : "#555",
       },
-      { label: "\u2709  Get Updates", col: "#ffd43b" },
       { label: "\u263E  Community", col: "#5865F2" },
       { label: "Account", col: "#ffd43b" },
     ];
@@ -4062,43 +4081,28 @@ function drawSettingsMenu() {
     menuBtns.push({ x, y: controlY, w: controlWidth, h: actionHeight, act: control.id });
   });
 
-  const actionWidth = Math.min(190, (bw - 10) / 2);
   const actionY = Math.max(H * 0.77, controlY + actionHeight + 4);
-  const custom = {
-    x: W / 2 - actionWidth - 5,
-    y: actionY,
-    w: actionWidth,
-    h: actionHeight,
-    act: 11,
-  };
-  ctx.fillStyle = menuSel === custom.act ? "rgba(170,136,255,0.22)" : "rgba(255,255,255,0.04)";
-  ctx.strokeStyle = "#aa88ff";
-  ctx.lineWidth = menuSel === custom.act ? 2 : 1;
-  rRect(custom.x, custom.y, custom.w, custom.h, 9);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = "#fff";
-  ctx.font = `bold ${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
-  ctx.fillText("Custom color", custom.x + custom.w / 2, custom.y + custom.h * 0.65);
-  menuBtns.push(custom);
-
-  const account = {
-    x: W / 2 + 5,
-    y: actionY,
-    w: actionWidth,
-    h: actionHeight,
-    act: 12,
-  };
-  ctx.fillStyle = menuSel === account.act ? "rgba(255,212,59,0.24)" : "rgba(255,255,255,0.04)";
-  ctx.strokeStyle = "#ffd43b";
-  ctx.lineWidth = menuSel === account.act ? 2 : 1;
-  rRect(account.x, account.y, account.w, account.h, 9);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = "#fff";
-  ctx.font = `bold ${compact ? 12 : 14}px "Segoe UI", system-ui, sans-serif`;
-  ctx.fillText("Account", W / 2 + actionWidth / 2 + 5, account.y + account.h * 0.65);
-  menuBtns.push(account);
+  const showInstall = !(window.chrome && window.chrome.webview);
+  const actionRow = [{ label: "Custom color", act: 11, col: "#aa88ff" }];
+  if (showInstall) actionRow.push({ label: "Install app", act: 17, col: "#00ff88" });
+  actionRow.push({ label: "Account", act: 12, col: "#ffd43b" });
+  const slotGap = 6;
+  const slotW = Math.floor((bw - slotGap * (actionRow.length - 1)) / actionRow.length);
+  actionRow.forEach((b, i) => {
+    const x = bx + i * (slotW + slotGap);
+    const hov = menuSel === b.act;
+    ctx.fillStyle = hov ? colorAlpha(b.col, 0.24) : "rgba(255,255,255,0.04)";
+    ctx.strokeStyle = b.col;
+    ctx.lineWidth = hov ? 2 : 1;
+    rRect(x, actionY, slotW, actionHeight, 9);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = `bold ${compact ? 11 : 13}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(b.label, x + slotW / 2, actionY + actionHeight * 0.65, slotW - 8);
+    menuBtns.push({ x, y: actionY, w: slotW, h: actionHeight, act: b.act });
+  });
 
   const backY = Math.max(H * 0.89, actionY + actionHeight + 8);
   const backW = Math.min(110, bw * 0.26);
@@ -4203,11 +4207,10 @@ function menuAction() {
     } else if (menuSel === 1) openEditor();
     else if (menuSel === 2) practiceMode = !practiceMode;
     else if (menuSel === 3) muted = !muted;
-    else if (menuSel === 4) window.location.href = "updates.html";
-    else if (menuSel === 5) {
+    else if (menuSel === 4) {
       menuScreen = "community";
       menuSel = 0;
-    } else if (menuSel === 6) {
+    } else if (menuSel === 5) {
       menuScreen = "account";
       menuSel = 0;
     }
@@ -4258,6 +4261,7 @@ function menuAction() {
     } else if (menuSel === 14) window.location.href = "updates.html";
     else if (menuSel === 15) window.location.href = "privacy.html";
     else if (menuSel === 16) window.location.href = "terms.html";
+    else if (menuSel === 17) installPwa();
   } else if (menuScreen === "account") {
     const inviteOffset = discordState === "ready" ? 1 : 0;
     if (menuSel === 0) openEmailAuth("signup");
@@ -4284,7 +4288,7 @@ function menuAction() {
 function menuClickAt(mx, my) {
   for (const b of menuBtns) {
     if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-      if (menuScreen === "main" && b.act < 7) {
+      if (menuScreen === "main" && b.act < 6) {
         menuSel = b.act;
         menuAction();
       } else if (menuScreen === "settings" || menuScreen === "account") {
